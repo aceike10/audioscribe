@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AudioScribe</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="bar">
+    <span class="title">Transcript</span>
+    <span class="bar-right">
+    <button id="btnUpdate" class="btn update" hidden>Update</button>
+    <button id="btnSettings" class="icon" aria-label="Settings" aria-expanded="false">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
+    </button>
+    </span>
+  </header>
+
+  <section id="settings" class="settings" hidden>
+    <label>Python <input id="setPython" placeholder="python3 (or full path to your aligner env's python)"></label>
+    <label>MFA <input id="setMfa" placeholder="auto: next to Python, then PATH"></label>
+    <div class="row">
+      <label>Whisper model
+        <select id="setModel">
+          <option>base</option><option selected>small</option><option>medium</option><option>large-v3</option>
+        </select>
+      </label>
+      <label>Language <input id="setLang" value="en" size="4"></label>
+    </div>
+    <label>Transcribe
+      <select id="setRange">
+        <option value="layer" selected>Only the part of the clip the layer uses</option>
+        <option value="whole">The whole file</option>
+      </select>
+    </label>
+    <div class="row">
+      <label>Lines <select id="setLines"><option value="1">1</option><option value="2" selected>2</option></select></label>
+      <label>Line length <input id="setChars" type="number" min="12" max="80" value="32"> chars</label>
+      <label>Highlight <input id="setColor" type="color" value="#f0a23b"></label>
+    </div>
+    <label class="check"><input id="setFresh" type="checkbox"> Ignore cache on next transcribe</label>
+    <hr>
+    <label>Update repo <input id="setRepo" placeholder="yourname/audioscribe"></label>
+    <label>GitHub token <input id="setToken" type="password" placeholder="only needed for a private repo"></label>
+    <div class="row between"><span id="appVersion" class="dim"></span><button id="btnCheck" class="btn">Check for updates</button></div>
+  </section>
+
+  <section class="layer">
+    <div class="layer-row">
+      <div id="layerNum" class="layer-num">–</div>
+      <div class="layer-meta">
+        <span id="layerName" class="layer-name">No layer loaded</span>
+        <span id="layerSub" class="sub">Select a footage layer, then transcribe</span>
+      </div>
+      <button id="btnTranscribe" class="btn">Transcribe</button>
+    </div>
+    <div class="layer-row">
+      <div class="seg" role="group" aria-label="Granularity">
+        <button id="modeWords" aria-pressed="true">Words</button>
+        <button id="modeSounds" aria-pressed="false">Sounds</button>
+      </div>
+      <label for="find" class="sr">Find in transcript</label>
+      <div class="find">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="#a8a8a8" stroke-width="1.4" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><path d="M8 8l2.5 2.5"/></svg>
+        <input id="find" placeholder="Find, then press Enter">
+      </div>
+    </div>
+  </section>
+
+  <main id="transcript" class="transcript">
+    <p class="empty">Select a layer with dialogue in your comp and press Transcribe. Click any word to move the playhead there. Double-click a word to fix it.</p>
+  </main>
+
+  <section id="sounds" class="sounds" hidden>
+    <div class="sounds-head">
+      <div><span id="sWord" class="s-word"></span> <span id="sSpan" class="mono dim"></span></div>
+      <div class="pair">
+        <button id="prevPhone" class="icon boxed" aria-label="Previous sound"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg></button>
+        <button id="nextPhone" class="icon boxed" aria-label="Next sound"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg></button>
+      </div>
+    </div>
+    <div id="phones" class="phones"></div>
+    <div class="sounds-foot"><span id="sShape"></span><span id="sNote"></span></div>
+  </section>
+
+  <section id="waveWrap" class="wave" hidden>
+    <canvas id="wave" tabindex="0" aria-label="Waveform of the current caption. Click or drag to move the playhead; Left and Right arrows step one frame."></canvas>
+  </section>
+
+  <section class="captions">
+    <div class="preview"><div id="capPreview" class="cap"></div></div>
+    <div class="layer-row">
+      <button id="btnHighlight" class="btn" aria-pressed="true">Highlight: On</button>
+      <button id="btnBg" class="btn">Box: Per line</button>
+      <button id="btnCaptions" class="btn primary">Create captions</button>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span id="tc" class="mono tc">--:--:--:--</span>
+    <span id="status" class="dim" role="status"></span>
+  </footer>
+</div>
+<script src="main.js"></script>
+<script src="updater.js"></script>
+</body>
+</html>
