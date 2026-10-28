@@ -1,0 +1,27 @@
+AudioScribe — transcripts and captions for After Effects
+=========================================================
+
+INSTALL ON A MAC
+1. Quit After Effects.
+2. Double-click "Install AudioScribe.command".
+   If macOS says it can't be opened because it's from an unidentified developer:
+   open System Settings > Privacy & Security, scroll down, click "Open Anyway",
+   then double-click the file again.
+   (Or open Terminal, type "bash " with a space, drag the file into the window,
+   and press Return.)
+3. Wait for "Done" (about 10 minutes the first time).
+
+INSTALL ON WINDOWS
+1. Quit After Effects.
+2. Double-click "Install AudioScribe (Windows).bat".
+   If Windows shows "Windows protected your PC", click More info > Run anyway.
+3. Wait for "Done" (about 10 minutes the first time).
+
+USE IT
+Open After Effects > Window > Extensions > AudioScribe.
+Select a layer with dialogue and press Transcribe. Click any word to jump there.
+
+Updates install from inside the panel: when one is available, an
+"Update to x.y.z" button appears at the top.
+
+Needs After Effects 2022 or later. Running the installer again is safe.
