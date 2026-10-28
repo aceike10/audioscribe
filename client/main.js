@@ -23,7 +23,8 @@
 
   // --------------------------------------------------------------- settings
   const SKEY = 'audioscribe.v2.settings';
-  const defaults = { python: '', mfa: '', model: 'small', lang: 'en', chars: 32, color: '#f0a23b', highlight: true, range: 'layer', repo: '', token: '', lines: 2, bg: 'line' };
+  const defaults = { python: '', mfa: '', model: 'small', lang: 'en', chars: 32, color: '#f0a23b', highlight: true, range: 'layer', repo: '', token: '', lines: 2, bg: 'line',
+    box: { padX: 27, padY: 14, round: 19, opacity: 70 } };
   let settings = Object.assign({}, defaults);
   try { Object.assign(settings, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) { /* keep defaults */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
@@ -33,7 +34,7 @@
     layer: null, timing: null, words: [], segs: [], aligned: false,
     mode: 'words', cur: -1, phone: 0, pin: null, els: [], cards: [], busy: false, lastT: null,
     data: null, dataPath: null, range: null, editing: false, undo: [], gapWarned: false,
-    t: null, peaks: null, dragWin: null
+    t: null, peaks: null, dragWin: null, rig: null, rigMany: false, rigDrag: false
   };
   const WHOLE = 999999;
 
@@ -189,7 +190,8 @@
       frames[f] = (frames[f] || 0) + 1;
       const b = document.createElement('button');
       b.className = 'ph' + (j === S.phone ? ' cur' : '');
-      b.style.flex = Math.max(0.02, p.end - p.start) + ' 1 0';
+      // Width = this sound's share of the word (flex-grow must sum past 1 to fill).
+      b.style.flex = Math.max(2, (p.end - p.start) / Math.max(0.001, w.end - w.start) * 100) + ' 1 0';
       b.dataset.j = j;
       b.title = tc(compOf(p.start));
       b.innerHTML = '<b></b><small></small>';
@@ -203,18 +205,38 @@
     $('sNote').textContent = shared ? shared + (shared > 1 ? ' frames hold' : ' frame holds') + ' 2+ sounds' : 'One sound per frame';
   }
 
+  // The preview mirrors the look being edited: the targeted rig's settings, or
+  // the defaults. Sizes are scaled from a 1080p caption (54 px text) to the
+  // preview's 12 px text.
+  function previewLook() {
+    const k = 12 / 54;
+    const src = S.rig || settings.box;
+    const ref = S.rig ? 1080 / (S.rig.h || 1080) : 1;
+    const v = (key, d) => (src[key] == null ? d : src[key]);
+    return {
+      mode: rigMode(), hl: rigHL(),
+      px: v('padX', 27) * ref * k, py: v('padY', 14) * ref * k,
+      r: v('round', 19) * ref * k, op: v('opacity', 70) / 100
+    };
+  }
+
   function renderPreview() {
     const box = $('capPreview');
     box.textContent = '';
-    box.className = 'cap bg-' + settings.bg;
-    const card = cardOf(S.cur);
+    const look = previewLook();
+    box.className = 'cap bg-' + look.mode;
+    box.style.setProperty('--px', look.px.toFixed(1) + 'px');
+    box.style.setProperty('--py', look.py.toFixed(1) + 'px');
+    box.style.setProperty('--r', look.r.toFixed(1) + 'px');
+    box.style.setProperty('--op', String(look.op));
+    const card = cardOf(S.cur) || S.cards[0];
     if (!card) return;
     card.lines.forEach((ln) => {
       const row = document.createElement('div');
       row.className = 'cap-line';
       ln.idxs.forEach((i) => {
         const s = document.createElement('span');
-        s.className = 'cw' + (settings.highlight && i === S.cur ? ' hl' : '');
+        s.className = 'cw' + (look.hl && i === S.cur ? ' hl' : '');
         s.textContent = S.words[i].word;
         row.appendChild(s);
       });
@@ -224,7 +246,8 @@
   const cardOf = (i) => S.cards.find((c) => c.idxs.indexOf(i) >= 0);
 
   // --------------------------------------------------------------- captions
-  function buildCards() {
+  function buildCards(lines) {
+    lines = lines || settings.lines;
     const cards = [];
     if (!S.timing) return cards;
     let cur = null;
@@ -232,7 +255,7 @@
     S.words.forEach((w, i) => {
       const cs = compOf(w.start), ce = compOf(w.end);
       if (cs < S.timing.ip - 1e-4 || cs >= S.timing.op) { close(); return; }
-      const limit = settings.chars * settings.lines, len = cur ? cur.text.length + 1 + w.word.length : 0;
+      const limit = settings.chars * lines, len = cur ? cur.text.length + 1 + w.word.length : 0;
       // Let a caption run up to 20% long to finish a sentence instead of orphaning its last word.
       const finishes = /[.!?]["'”’)\]]?$/.test(w.word) && len <= limit * 1.2;
       if (cur && ((len > limit && !finishes) || cs - cur.lastEnd > 0.7)) close();
@@ -250,17 +273,17 @@
       if (next && next.start - c.end < 0.5) c.end = next.start;
       c.end = Math.round(Math.min(c.end, next ? next.start : Infinity, S.timing.op) * fps()) / fps();
       c.end = Math.max(c.end, c.start + 1 / fps());
-      c.lines = splitLines(c);
+      c.lines = splitLines(c, lines);
     });
     return cards;
   }
 
   // Two-line mode: split at the word boundary that best balances the lines.
-  function splitLines(card) {
+  function splitLines(card, lines) {
     const items = card.idxs.map((i, k) => ({ i, w: card.words[k].w, t: card.words[k].t }));
     const mk = (arr) => ({ text: arr.map((x) => x.w).join(' '), idxs: arr.map((x) => x.i),
       words: arr.map((x) => ({ t: x.t, w: x.w })) });
-    if (settings.lines < 2 || card.text.length <= settings.chars || items.length < 2) return [mk(items)];
+    if (lines < 2 || card.text.length <= settings.chars || items.length < 2) return [mk(items)];
     let best = 1, score = Infinity;
     for (let k = 1; k < items.length; k++) {
       const a = mk(items.slice(0, k)).text.length, b = mk(items.slice(k)).text.length;
@@ -285,14 +308,14 @@
     const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
     fs.writeFileSync(file, JSON.stringify({
       name: 'Captions – ' + S.layer.name, fontScale: 0.05, yPos: 0.88, lines: settings.lines,
-      highlight: settings.highlight, color: hexToRGB(settings.color), bg: settings.bg,
+      highlight: settings.highlight, color: hexToRGB(settings.color), bg: settings.bg, box: settings.box,
       cards: S.cards.map((c) => ({ start: c.start, end: c.end,
         lines: c.lines.map((l) => ({ text: l.text, words: l.words })) }))
     }), 'utf8');
     const r = await esJSON('as_makeCaptions(' + JSON.stringify(file) + ')');
     busyEnd();
     $('btnCaptions').disabled = false;
-    if (r.ok) notify('ok', 'Created “' + r.name + '” with ' + r.cards + ' captions. Select its null to style them in Effect Controls.');
+    if (r.ok) notify('ok', 'Created “' + r.name + '” with ' + r.cards + ' captions. Adjust the box with the controls above, or in the null’s Effect Controls.');
     else notify('error', r.err);
   }
 
@@ -366,7 +389,7 @@
     return '';
   }
 
-  function runHelper(src, out, range) {
+  function runHelper(src, out, range, extra) {
     return new Promise((resolve, reject) => {
       const py = settings.python || detectPython() || (WIN ? 'python' : 'python3');
       const args = [path.join(extDir(), 'helper', 'transcribe.py'), src, out,
@@ -374,6 +397,7 @@
       if (settings.mfa) args.push('--mfa', settings.mfa);
       if (range[0] > 0) args.push('--start', String(range[0]));
       if (range[1] < WHOLE) args.push('--end', String(range[1]));
+      if (extra) args.push(...extra);
       let tail = '';
       const p = cp.spawn(py, args, { env: childEnv() });
       let frac = 0.01, msg = 'Starting…', cancelled = false;
@@ -390,13 +414,14 @@
       });
       p.on('close', () => { if (cancelled) reject(new Error('Cancelled')); });
       p.on('error', (e) => reject(new Error(e.code === 'ENOENT' ?
-        'Python not found. Set its full path in Settings.' : e.message)));
+        'Python not found. Run the AudioScribe installer, or set its path in Settings › Advanced.' : e.message)));
       p.on('close', (code) => code === 0 ? resolve() :
         reject(new Error((tail.split(/\r?\n/).filter((l) => l && !/^(STATUS|PROGRESS)/.test(l)).pop()) || 'Transcription failed')));
     });
   }
 
   function loadData(file) {
+    if (typeof stop === 'function') stop();
     const d = JSON.parse(fs.readFileSync(file, 'utf8'));
     S.data = d;
     S.dataPath = file;
@@ -491,6 +516,7 @@
     S.pin = { t, i, j: j || 0 };
     S.t = t;
     S.cur = i; S.phone = j || 0;
+    if (playing) seekAudio(t);
     paintCurrent(false);
     $('tc').textContent = tc(t);
     await es('as_setTime(' + t + ')');
@@ -533,6 +559,7 @@
   }
 
   function onTime(r) {
+    if (playing) return; // the panel's own clock drives everything while playing
     if (!r.here) { $('tc').textContent = '--:--:--:--'; return; }
     const moved = !S.timing || r.st !== S.timing.st || r.sr !== S.timing.sr ||
       r.ip !== S.timing.ip || r.op !== S.timing.op;
@@ -662,6 +689,7 @@
     S.t = t;
     const i = wordAt(t);
     S.pin = { t, i, j: i >= 0 ? phoneAt(i, t) : 0 };
+    if (playing) seekAudio(t);
     $('tc').textContent = tc(t);
     if (i !== S.cur) { S.cur = i; S.phone = S.pin.j; paintCurrent(true); }
     else { S.phone = S.pin.j; renderSounds(); drawWave(); }
@@ -687,6 +715,103 @@
     scrubTo(S.t + (e.key === 'ArrowRight' ? 1 : -1) / fps() * (e.shiftKey ? 10 : 1) + 1e-6);
   });
   if (window.ResizeObserver) new ResizeObserver(() => drawWave()).observe($('wave'));
+
+  // ---------------------------------------------------------------- playback
+  // AE doesn't let panels read the playhead during its own preview playback,
+  // so the panel plays the audio itself: transcript and waveform follow live,
+  // and AE's playhead follows along (a few times a second) and lands where you
+  // stop. Audio comes from a 16 kHz copy the helper writes next to the cache.
+  const audio = new Audio();
+  let playing = false, raf = 0, lastPush = 0;
+
+  const wavPath = () => S.dataPath && S.dataPath.replace(/\.json$/, '.wav');
+  const fileURL = (p) => WIN ? 'file:///' + encodeURI(p.replace(/\\/g, '/')) : 'file://' + encodeURI(p);
+
+  async function ensureAudio() {
+    const wav = wavPath();
+    if (!fs.existsSync(wav)) {
+      // Transcript made before playback existed: write just the audio.
+      try {
+        await runHelper(S.layer.path, S.dataPath, [S.range[0], S.range[1]], ['--audio-only']);
+      } finally { busyEnd(); }
+    }
+    if (audio.dataset.src !== wav) {
+      audio.dataset.src = wav;
+      audio.src = fileURL(wav);
+      await new Promise((res, rej) => {
+        audio.onloadedmetadata = res;
+        audio.onerror = () => rej(new Error('Couldn’t load the audio for playback.'));
+      });
+    }
+  }
+  const audioOffset = (t) => srcOf(t) - S.range[0];
+  function seekAudio(t) {
+    const off = audioOffset(t);
+    if (off >= 0 && off < audio.duration) audio.currentTime = off;
+  }
+
+  function setPlayUI() {
+    $('btnPlay').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    $('btnPlay').setAttribute('aria-pressed', String(playing));
+    // SVG elements ignore .hidden; toggle the attribute instead.
+    $('playIcon').toggleAttribute('hidden', playing);
+    $('pauseIcon').toggleAttribute('hidden', !playing);
+  }
+
+  async function play() {
+    if (playing) return;
+    if (!S.layer || !S.words.length || !S.timing) { notify('error', 'Transcribe a layer first.'); return; }
+    try { await ensureAudio(); } catch (e) { notify('error', e.message === 'Cancelled' ? 'Cancelled.' : e.message); return; }
+    let t = S.t != null ? S.t : compOf(S.words[0].start);
+    if (t < S.timing.ip || t >= S.timing.op - 1 / fps()) t = S.timing.ip;
+    const off = audioOffset(t);
+    audio.currentTime = Math.max(0, Math.min(audio.duration - 0.01, off));
+    try { await audio.play(); } catch (e) { notify('error', 'Playback failed: ' + e.message); return; }
+    playing = true;
+    S.pin = null;
+    setPlayUI();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function stop() {
+    if (!playing) return;
+    playing = false;
+    audio.pause();
+    cancelAnimationFrame(raf);
+    setPlayUI();
+    if (S.t != null) {
+      const t = snap(S.t);
+      S.t = t;
+      S.pin = { t, i: S.cur, j: S.phone };
+      $('tc').textContent = tc(t);
+      pushTime(t);
+      drawWave();
+    }
+  }
+
+  function tick(now) {
+    if (!playing) return;
+    const t = compOf(S.range[0] + audio.currentTime);
+    if (audio.ended || t >= S.timing.op) { stop(); return; }
+    S.t = t;
+    $('tc').textContent = tc(t);
+    const i = wordAt(t), j = i >= 0 ? phoneAt(i, t) : 0;
+    if (i !== S.cur) { S.cur = i; S.phone = j; paintCurrent(true); }
+    else if (j !== S.phone) { S.phone = j; renderSounds(); drawWave(); }
+    else drawWave();
+    if (now - lastPush > 200) { lastPush = now; pushTime(snap(t)); }
+    raf = requestAnimationFrame(tick);
+  }
+
+  $('btnPlay').onclick = () => (playing ? stop() : play());
+  // Space plays/pauses while the panel has focus (not while typing).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== ' ' || S.editing) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    if (playing) stop(); else play();
+  });
 
   // ----------------------------------------------------------------- editing
   // Double-click a word to edit it. Enter or clicking away saves, Esc cancels,
@@ -780,16 +905,149 @@
     $('modeSounds').setAttribute('aria-pressed', String(m === 'sounds'));
     renderSounds();
   }
+  // ---------------------------------------------------------------- box style
+  // The Box controls and the Highlight/Box buttons edit the selected captions
+  // rig live (or the only rig in the comp). With no rig, they set the defaults
+  // for new captions. Edits to a rig also become the new defaults.
   const BG_LABEL = { off: 'Off', line: 'Per line', block: 'Block' };
+  // "pad" is the uniform Padding slider: it sets X and Y together. Ticking
+  // "Separate X and Y" swaps it for individual X and Y sliders.
+  const BOX = [
+    { key: 'pad', id: 'Pad', max: 200 },
+    { key: 'padX', id: 'PadX', max: 200 }, { key: 'padY', id: 'PadY', max: 200 },
+    { key: 'round', id: 'Round', max: 200 }, { key: 'opacity', id: 'Opacity', max: 100 }];
+
+  function rigMode() { return !S.rig ? settings.bg : (S.rig.bg != 1 ? 'off' : S.rig.perLine == 1 ? 'line' : 'block'); }
+  function rigHL() { return S.rig ? S.rig.hl == 1 : settings.highlight; }
+
+  function renderToggles() {
+    const on = rigHL(), mode = rigMode();
+    $('btnHighlight').setAttribute('aria-pressed', String(on));
+    $('btnHighlight').textContent = 'Highlight: ' + (on ? 'On' : 'Off');
+    $('btnBg').textContent = 'Box: ' + BG_LABEL[mode];
+  }
+
+  function renderBox() {
+    $('rigTarget').textContent = S.rig ? 'Editing “' + S.rig.name + '”' :
+      S.rigMany ? 'Select a captions rig to edit it' : 'Defaults for new captions';
+    $('rigTarget').title = $('rigTarget').textContent;
+    const split = !!settings.box.split;
+    $('splitPad').checked = split;
+    $('rowPad').hidden = split;
+    $('padXY').hidden = !split;
+    $('btnUpdateCaps').disabled = !S.rig;
+    $('btnUpdateCaps').title = S.rig ? 'Rewrite “' + S.rig.name + '” from the current transcript' :
+      'Select a captions rig to update it';
+    BOX.forEach((b) => {
+      const key = b.key === 'pad' ? 'padX' : b.key;
+      const v = S.rig ? S.rig[key] : settings.box[key];
+      if (v == null) return;
+      const r = $('sl' + b.id), n = $('n' + b.id);
+      if (!(S.rigDrag && document.activeElement === r)) r.value = Math.min(b.max, v);
+      if (document.activeElement !== n) n.value = Math.round(v);
+    });
+    renderToggles();
+    renderPreview();
+  }
+
+  // Sends rig changes one at a time, always the latest value per control.
+  const rigPending = {};
+  let rigSending = false;
+  async function sendRig(key, value) {
+    if (!S.rig) return;
+    rigPending[key] = value;
+    if (rigSending) return;
+    rigSending = true;
+    while (Object.keys(rigPending).length && S.rig) {
+      const k = Object.keys(rigPending)[0], v = rigPending[k];
+      delete rigPending[k];
+      const r = await esJSON('as_setRig(' + S.rig.id + ',' + JSON.stringify(k) + ',' + v + ')');
+      if (!r.ok) { notify('error', r.err); S.rig = null; renderBox(); break; }
+    }
+    rigSending = false;
+  }
+
+  function setOne(key, v) {
+    if (S.rig) {
+      S.rig[key] = v;
+      sendRig(key, v);
+      settings.box[key] = key === 'opacity' ? v : Math.round(v * 1080 / (S.rig.h || 1080));
+    } else settings.box[key] = v;
+  }
+  function setBoxValue(b, v) {
+    v = Math.max(0, Math.min(b.key === 'opacity' ? 100 : 999, Number(v) || 0));
+    if (b.key === 'pad') { setOne('padX', v); setOne('padY', v); }
+    else setOne(b.key, v);
+    saveSettings();
+    const r = $('sl' + b.id), n = $('n' + b.id);
+    if (document.activeElement !== r) r.value = Math.min(b.max, v);
+    if (document.activeElement !== n) n.value = Math.round(v);
+    renderPreview();
+  }
+  $('splitPad').addEventListener('change', () => {
+    settings.box.split = $('splitPad').checked;
+    // Back to uniform: Y follows X.
+    if (!settings.box.split) {
+      const x = S.rig ? S.rig.padX : settings.box.padX;
+      if (x != null) { setOne('padY', x); }
+    }
+    saveSettings();
+    renderBox();
+  });
+
+  async function updateCaptions() {
+    if (!S.rig) { notify('error', 'Select the captions rig you want to update.'); return; }
+    if (!S.layer || !S.words.length) { notify('error', 'Transcribe the dialogue layer first.'); return; }
+    const cards = buildCards(S.rig.lines);
+    if (!cards.length) { notify('error', 'No words fall inside the layer’s in and out points.'); return; }
+    const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
+    fs.writeFileSync(file, JSON.stringify({ cards: cards.map((c) => ({ start: c.start, end: c.end,
+      lines: c.lines.map((l) => ({ text: l.text, words: l.words })) })) }), 'utf8');
+    $('btnUpdateCaps').disabled = true;
+    busy('Updating “' + S.rig.name + '”…', null);
+    await new Promise((r) => setTimeout(r, 60));
+    const r = await esJSON('as_updateCaptions(' + JSON.stringify(file) + ',' + S.rig.id + ')');
+    busyEnd();
+    $('btnUpdateCaps').disabled = !S.rig;
+    if (r.ok) notify('ok', 'Updated “' + r.name + '”: ' + r.cards + ' captions from the current transcript. Styling was kept.');
+    else notify('error', r.err);
+  }
+
+  BOX.forEach((b) => {
+    const r = $('sl' + b.id), n = $('n' + b.id);
+    r.max = b.max;
+    r.addEventListener('pointerdown', () => { S.rigDrag = true; });
+    r.addEventListener('pointerup', () => { S.rigDrag = false; });
+    r.addEventListener('input', () => { n.value = r.value; setBoxValue(b, r.value); });
+    r.addEventListener('change', () => { S.rigDrag = false; });
+    n.addEventListener('change', () => setBoxValue(b, n.value));
+    n.addEventListener('keydown', (e) => { if (e.key === 'Enter') { setBoxValue(b, n.value); n.blur(); } });
+  });
+
+  async function pollRig() {
+    try {
+      if (!S.busy && !document.hidden && !S.rigDrag && !rigSending) {
+        const r = await esJSON('as_getRig()');
+        if (r.ok) { S.rig = r.found ? r : null; S.rigMany = !!r.many; renderBox(); }
+      }
+    } catch (e) { /* AE busy; try again */ }
+    setTimeout(pollRig, 800);
+  }
+
   function setBg(v) {
     settings.bg = v; saveSettings();
-    $('btnBg').textContent = 'Box: ' + BG_LABEL[v];
+    if (S.rig) {
+      S.rig.bg = v === 'off' ? 0 : 1;
+      sendRig('bg', S.rig.bg);
+      if (v !== 'off') { S.rig.perLine = v === 'line' ? 1 : 0; sendRig('perLine', S.rig.perLine); }
+    }
+    renderToggles();
     renderPreview();
   }
   function setHighlight(on) {
     settings.highlight = on; saveSettings();
-    $('btnHighlight').setAttribute('aria-pressed', String(on));
-    $('btnHighlight').textContent = 'Highlight: ' + (on ? 'On' : 'Off');
+    if (S.rig) { S.rig.hl = on ? 1 : 0; sendRig('hl', S.rig.hl); }
+    renderToggles();
     renderPreview();
   }
 
@@ -820,14 +1078,33 @@
   $('modeSounds').onclick = () => setMode('sounds');
   $('btnTranscribe').onclick = transcribe;
   $('btnCaptions').onclick = createCaptions;
-  $('btnHighlight').onclick = () => setHighlight(!settings.highlight);
-  $('btnBg').onclick = () => setBg({ off: 'line', line: 'block', block: 'off' }[settings.bg] || 'line');
+  $('btnUpdateCaps').onclick = updateCaptions;
+  $('btnHighlight').onclick = () => setHighlight(!rigHL());
+  $('btnBg').onclick = () => setBg({ off: 'line', line: 'block', block: 'off' }[rigMode()] || 'line');
   $('find').addEventListener('keydown', (e) => { if (e.key === 'Enter') find(); });
-  $('btnSettings').onclick = () => {
-    const box = $('settings');
-    box.hidden = !box.hidden;
-    $('btnSettings').setAttribute('aria-expanded', String(!box.hidden));
-  };
+  // Tabs: Transcript, Captions, Settings. Arrow keys move between tabs.
+  const TABS = ['Transcript', 'Captions', 'Settings'];
+  function showTab(name, focus) {
+    TABS.forEach((t) => {
+      const on = t === name, b = $('tabBtn' + t);
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+      $('tab' + t).hidden = !on;
+      if (on && focus) b.focus();
+    });
+    try { sessionStorage.setItem('audioscribe.tab', name); } catch (e) { /* ignore */ }
+    if (name === 'Transcript') drawWave();
+    if (name === 'Captions') { renderPreview(); renderBox(); }
+  }
+  TABS.forEach((t, k) => {
+    const b = $('tabBtn' + t);
+    b.onclick = () => showTab(t);
+    b.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      showTab(TABS[(k + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length], true);
+    });
+  });
 
   const bind = (id, key, num) => {
     const el = $(id);
@@ -847,7 +1124,12 @@
   setBg(settings.bg);
   { const found = detectPython(); if (found) $('setPython').placeholder = 'auto: ' + found; }
   document.documentElement.style.setProperty('--playhead', settings.color);
+  settings.box = Object.assign({}, defaults.box, settings.box);
+  { let t = null; try { t = sessionStorage.getItem('audioscribe.tab'); } catch (e) { /* ignore */ }
+    showTab(TABS.indexOf(t) >= 0 ? t : 'Transcript'); }
   setHighlight(settings.highlight);
+  renderBox();
+  pollRig();
 
   poll();
 })();

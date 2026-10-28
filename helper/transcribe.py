@@ -8,6 +8,8 @@ add per-sound (phoneme) timing with the Montreal Forced Aligner (MFA).
                          [--mfa /path/to/mfa] [--no-align]
 
 --start/--end limit transcription to that part of the source (seconds).
+Also writes OUTPUT.wav (16 kHz mono, same range) for playback in the panel.
+--audio-only writes just that .wav, for transcripts made before it existed.
 
 Output:
 {
@@ -235,6 +237,7 @@ def main():
     ap.add_argument("--no-align", action="store_true")
     ap.add_argument("--start", type=float, default=None)
     ap.add_argument("--end", type=float, default=None)
+    ap.add_argument("--audio-only", action="store_true")
     a = ap.parse_args()
 
     if not os.path.exists(a.src):
@@ -256,6 +259,13 @@ def main():
     if e - s < 0.1:
         print("The layer's range is outside the source audio.", file=sys.stderr)
         sys.exit(1)
+    wav_out = os.path.splitext(os.path.abspath(a.out))[0] + ".wav"
+    os.makedirs(os.path.dirname(wav_out), exist_ok=True)
+    write_wav(wav_out, audio[int(s * SR):int(e * SR)])
+    if a.audio_only:
+        progress(1.0)
+        print(wav_out)
+        return
     if s > 0 or e < dur:
         status("Transcribing %.1fs of %.1fs" % (e - s, dur))
     segs, words = transcribe(audio[int(s * SR):int(e * SR)], a.model, a.lang)

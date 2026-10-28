@@ -142,8 +142,13 @@ function _bgShape(c, name, ctrl, boxExpr, perLine) {
   var grp = S.property('ADBE Root Vectors Group').addProperty('ADBE Vector Group');
   grp.name = 'Box';
   var cont = grp.property('ADBE Vectors Group');
-  var rect = cont.addProperty('ADBE Vector Shape - Rect');
-  var fill = cont.addProperty('ADBE Vector Graphic - Fill');
+  // Adding a property invalidates references to its siblings in AE, so add
+  // everything first, then fetch fresh references.
+  cont.addProperty('ADBE Vector Shape - Rect');
+  cont.addProperty('ADBE Vector Graphic - Fill');
+  cont = S.property('ADBE Root Vectors Group').property(1).property('ADBE Vectors Group');
+  var rect = cont.property('ADBE Vector Shape - Rect');
+  var fill = cont.property('ADBE Vector Graphic - Fill');
   S.parent = ctrl;
   var pre = _boxPrelude() + 'var B = ' + boxExpr + ';\n';
   _expr(rect.property('ADBE Vector Rect Size'), pre +
@@ -178,11 +183,16 @@ function _textLayer(c, name, fontSize, ctrl) {
 
 function _addHighlight(L) {
   var anims = L.property('ADBE Text Properties').property('ADBE Text Animators');
-  var anim = anims.addProperty('ADBE Text Animator');
+  anims.addProperty('ADBE Text Animator');
+  var idx = anims.numProperties;
+  // Add everything first; adding invalidates earlier references (see _bgShape).
+  anims.property(idx).property('ADBE Text Animator Properties').addProperty('ADBE Text Fill Color');
+  anims.property(idx).property('ADBE Text Selectors').addProperty('ADBE Text Selector');
+  var anim = L.property('ADBE Text Properties').property('ADBE Text Animators').property(idx);
   anim.name = 'Word Highlight';
-  var fill = anim.property('ADBE Text Animator Properties').addProperty('ADBE Text Fill Color');
+  var fill = anim.property('ADBE Text Animator Properties').property('ADBE Text Fill Color');
   _expr(fill, 'thisLayer.parent.effect("Highlight Color")("Color");', L.name + ' highlight color');
-  var sel = anim.property('ADBE Text Selectors').addProperty('ADBE Text Selector');
+  var sel = anim.property('ADBE Text Selectors').property(1);
   var adv = sel.property('ADBE Text Range Advanced');
   adv.property('ADBE Text Range Units').setValue(2);   // Index
   adv.property('ADBE Text Range Type2').setValue(3);   // Based On: Words
@@ -220,6 +230,46 @@ function _sortKeys(list) {
   return out;
 }
 
+// Writes Source Text keys (one per caption) and word markers to the line layers.
+// Returns the number of words placed.
+function _writeCaptionKeys(d, top, bot) {
+  var two = !!top, BLANK = ' ';
+  var tTop = [], tBot = [], mTop = [], mBot = [];
+  if (d.cards[0].start > 0) {
+    tBot.push({ t: 0, v: BLANK });
+    if (two) tTop.push({ t: 0, v: BLANK });
+  }
+  var nWords = 0;
+  for (var i = 0; i < d.cards.length; i++) {
+    var card = d.cards[i], ls = card.lines;
+    var lb = ls[ls.length - 1], lt = ls.length > 1 ? ls[0] : null;
+    tBot.push({ t: card.start, v: lb.text });
+    if (two) tTop.push({ t: card.start, v: lt ? lt.text : BLANK });
+    // Clear any highlight left over from the previous card first.
+    mBot.push({ t: card.start, v: '-1' });
+    if (two) mTop.push({ t: card.start, v: '-1' });
+    if (lt) {
+      for (var a = 0; a < lt.words.length; a++) mTop.push({ t: lt.words[a].t, v: a + ' ' + lt.words[a].w });
+      mTop.push({ t: lb.words[0].t, v: '-1' });
+      nWords += lt.words.length;
+    }
+    for (var b = 0; b < lb.words.length; b++) mBot.push({ t: lb.words[b].t, v: b + ' ' + lb.words[b].w });
+    nWords += lb.words.length;
+    var next = d.cards[i + 1];
+    if (!next || next.start - card.end > 0.001) {
+      tBot.push({ t: card.end, v: BLANK });
+      if (two) tTop.push({ t: card.end, v: BLANK });
+    }
+  }
+  _setTexts(bot, _sortKeys(tBot));
+  _setMarkers(bot, _sortKeys(mBot));
+  if (two) {
+    _setTexts(top, _sortKeys(tTop));
+    _setMarkers(top, _sortKeys(mTop));
+  }
+  return nWords;
+}
+
 function as_makeCaptions(path) {
   var c = _comp();
   if (!c) return _j({ ok: false, err: "Open a comp first." });
@@ -242,11 +292,14 @@ function as_makeCaptions(path) {
     ctrl.property('ADBE Transform Group').property('ADBE Position').setValue([c.width / 2, c.height * d.yPos]);
     _fx(ctrl, 'ADBE Checkbox Control', 'Background', d.bg !== 'off' ? 1 : 0);
     _fx(ctrl, 'ADBE Checkbox Control', 'Per Line', d.bg === 'block' ? 0 : 1);
-    _fx(ctrl, 'ADBE Slider Control', 'Padding X', Math.round(fs * 0.5));
-    _fx(ctrl, 'ADBE Slider Control', 'Padding Y', Math.round(fs * 0.25));
-    _fx(ctrl, 'ADBE Slider Control', 'Roundness', Math.round(fs * 0.35));
+    // Box defaults come from the panel in 1080p pixels; scale to this comp.
+    var k = c.height / 1080, bx = d.box || {};
+    var num = function (v, dflt) { return typeof v === 'number' && isFinite(v) ? v : dflt; };
+    _fx(ctrl, 'ADBE Slider Control', 'Padding X', Math.round(num(bx.padX, 27) * k));
+    _fx(ctrl, 'ADBE Slider Control', 'Padding Y', Math.round(num(bx.padY, 14) * k));
+    _fx(ctrl, 'ADBE Slider Control', 'Roundness', Math.round(num(bx.round, 19) * k));
     _fx(ctrl, 'ADBE Color Control', 'BG Color', [0, 0, 0, 1]);
-    _fx(ctrl, 'ADBE Slider Control', 'BG Opacity', 70);
+    _fx(ctrl, 'ADBE Slider Control', 'BG Opacity', num(bx.opacity, 70));
     _fx(ctrl, 'ADBE Slider Control', 'Line Spacing', Math.round(fs * 1.35));
     _fx(ctrl, 'ADBE Checkbox Control', 'Word Highlight', d.highlight ? 1 : 0);
     _fx(ctrl, 'ADBE Color Control', 'Highlight Color', [d.color[0], d.color[1], d.color[2], 1]);
@@ -277,47 +330,116 @@ function as_makeCaptions(path) {
     if (top) top.moveToBeginning();
     ctrl.moveToBeginning();
 
-    var tTop = [], tBot = [], mTop = [], mBot = [];
-    if (d.cards[0].start > 0) {
-      tBot.push({ t: 0, v: BLANK });
-      if (two) tTop.push({ t: 0, v: BLANK });
-    }
-    var nWords = 0;
-    for (var i = 0; i < d.cards.length; i++) {
-      var card = d.cards[i], ls = card.lines;
-      var lb = ls[ls.length - 1], lt = ls.length > 1 ? ls[0] : null;
-      tBot.push({ t: card.start, v: lb.text });
-      if (two) tTop.push({ t: card.start, v: lt ? lt.text : BLANK });
-      // Clear any highlight left over from the previous card first.
-      mBot.push({ t: card.start, v: '-1' });
-      if (two) mTop.push({ t: card.start, v: '-1' });
-      if (lt) {
-        for (var a = 0; a < lt.words.length; a++) mTop.push({ t: lt.words[a].t, v: a + ' ' + lt.words[a].w });
-        mTop.push({ t: lb.words[0].t, v: '-1' });
-        nWords += lt.words.length;
-      }
-      for (var b = 0; b < lb.words.length; b++) mBot.push({ t: lb.words[b].t, v: b + ' ' + lb.words[b].w });
-      nWords += lb.words.length;
-      var next = d.cards[i + 1];
-      if (!next || next.start - card.end > 0.001) {
-        tBot.push({ t: card.end, v: BLANK });
-        if (two) tTop.push({ t: card.end, v: BLANK });
-      }
-    }
-    _setTexts(bot, _sortKeys(tBot));
-    _setMarkers(bot, _sortKeys(mBot));
+    var nWords = _writeCaptionKeys(d, top, bot);
     _addHighlight(bot);
-    if (two) {
-      _setTexts(top, _sortKeys(tTop));
-      _setMarkers(top, _sortKeys(mTop));
-      _addHighlight(top);
-    }
+    if (two) _addHighlight(top);
     ctrl.selected = true;
     return _j({ ok: true, cards: d.cards.length, words: nWords, name: base });
   } catch (e) {
     // Don't leave half a rig behind.
     for (var r = made.length - 1; r >= 0; r--) { try { made[r].remove(); } catch (e2) { /* already gone */ } }
     return _j({ ok: false, err: 'Captions failed. ' + e.toString() + (e.line ? ' (host line ' + e.line + ')' : '') });
+  } finally {
+    app.endUndoGroup();
+  }
+}
+
+/* ------------------------------------------------------- caption rig styling
+   The panel's Box controls drive the controller null of the selected rig. */
+
+var RIG_FX = { padX: 'Padding X', padY: 'Padding Y', round: 'Roundness', opacity: 'BG Opacity',
+  bg: 'Background', perLine: 'Per Line', hl: 'Word Highlight' };
+
+function _isRig(L) {
+  try {
+    var fx = L.property('ADBE Effect Parade');
+    return !!(fx && fx.property('Padding X') && fx.property('Per Line') && fx.property('Roundness'));
+  } catch (e) { return false; }
+}
+// A rig's null, or any layer parented to it.
+function _rigOf(L) {
+  for (var i = 0; i < 3 && L; i++) {
+    if (_isRig(L)) return L;
+    L = L.parent;
+  }
+  return null;
+}
+function _rigVal(R, key) {
+  var p = R.property('ADBE Effect Parade').property(RIG_FX[key]);
+  return p ? p.property(1).value : null;
+}
+
+// Which rig to edit: the selected one, else the only one in the comp.
+function as_getRig() {
+  var c = _comp();
+  if (!c) return _j({ ok: true, found: false });
+  var R = null, sel = c.selectedLayers;
+  for (var i = 0; i < sel.length && !R; i++) R = _rigOf(sel[i]);
+  if (!R) {
+    var all = [];
+    for (var j = 1; j <= c.numLayers; j++) if (_isRig(c.layer(j))) all.push(c.layer(j));
+    if (all.length === 1) R = all[0];
+    else return _j({ ok: true, found: false, many: all.length > 1, h: c.height });
+  }
+  var out = { ok: true, found: true, id: R.id, name: R.name, h: c.height, lines: _rigParts(R).top ? 2 : 1 };
+  for (var k in RIG_FX) if (RIG_FX.hasOwnProperty(k)) out[k] = _rigVal(R, k);
+  return _j(out);
+}
+
+function as_setRig(id, key, value) {
+  var R = _layer(id);
+  if (!R || !RIG_FX[key]) return _j({ ok: false, err: "That captions rig is gone." });
+  var fx = R.property('ADBE Effect Parade').property(RIG_FX[key]);
+  if (!fx) return _j({ ok: false, err: "The rig is missing its " + RIG_FX[key] + " control." });
+  var p = fx.property(1);
+  app.beginUndoGroup('AudioScribe: ' + RIG_FX[key]);
+  try {
+    if (p.numKeys > 0) p.setValueAtTime(R.containingComp.time, value);
+    else p.setValue(value);
+  } catch (e) {
+    return _j({ ok: false, err: e.toString() });
+  } finally {
+    app.endUndoGroup();
+  }
+  return _j({ ok: true });
+}
+
+/* ------------------------------------------------------------ update captions
+   Rewrites an existing rig's caption text and word markers from the current
+   transcript. Fonts, styling, box settings and position are left alone. */
+
+function _rigParts(R) {
+  var c = R.containingComp, top = null, bot = null;
+  for (var i = 1; i <= c.numLayers; i++) {
+    var L = c.layer(i);
+    if (L.name === R.name + ' · Top') top = L;
+    else if (L.name === R.name + ' · Bottom') bot = L;
+  }
+  return { top: top, bot: bot };
+}
+function _clearKeys(p) {
+  for (var i = p.numKeys; i >= 1; i--) p.removeKey(i);
+}
+
+function as_updateCaptions(path, id) {
+  var R = _layer(id);
+  if (!R || !_isRig(R)) return _j({ ok: false, err: "Select the captions rig to update." });
+  var parts = _rigParts(R);
+  if (!parts.bot) return _j({ ok: false, err: "Couldn't find this rig's text layers. Were they renamed? They should end in “ · Top” and “ · Bottom”." });
+  var d;
+  try { d = _readJSON(path); } catch (e) { return _j({ ok: false, err: e.toString() }); }
+  if (!d.cards || !d.cards.length) return _j({ ok: false, err: "No words fall inside the layer's in and out points." });
+  app.beginUndoGroup('AudioScribe: Update captions');
+  try {
+    var layers = parts.top ? [parts.top, parts.bot] : [parts.bot];
+    for (var i = 0; i < layers.length; i++) {
+      _clearKeys(layers[i].property('ADBE Text Properties').property('ADBE Text Document'));
+      _clearKeys(layers[i].property('ADBE Marker'));
+    }
+    var n = _writeCaptionKeys(d, parts.top, parts.bot);
+    return _j({ ok: true, cards: d.cards.length, words: n, name: R.name });
+  } catch (e) {
+    return _j({ ok: false, err: 'Update failed. ' + e.toString() + (e.line ? ' (host line ' + e.line + ')' : '') });
   } finally {
     app.endUndoGroup();
   }

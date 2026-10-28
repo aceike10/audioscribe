@@ -6,7 +6,34 @@ playhead there. One button builds a captions layer with word-by-word highlight.
 
 This version replaces AudioScribe v1, using the same bundle id.
 
+## Layout
+
+The panel has three tabs:
+
+- **Transcript:** the layer and find box, the words, then a transport bar
+  (Play, Words/Sounds) above the Sounds view and the waveform strip.
+- **Captions:** a preview of the caption at the playhead, text options
+  (lines, length, highlight), box styling, and **Create captions**.
+- **Settings:** Whisper model and language, how much to transcribe, and
+  updates. **Advanced** holds the Python and MFA paths. Leave those empty
+  unless transcription says it can't find them; the panel finds them on its
+  own.
+
+Progress and results appear just under the tabs on every tab.
+
 ## What it does
+
+- **Play in the panel:** press Play, or Space while the panel is focused.
+  - The panel plays the clip's audio, and the transcript highlight and
+    waveform follow live.
+  - AE's playhead follows along a few times a second and lands exactly where
+    you stop.
+  - Clicking words or dragging the waveform while playing jumps the audio
+    there.
+  - This exists because AE doesn't let panels read the playhead during its own
+    spacebar preview.
+  - The audio is a small 16 kHz copy saved next to the transcript cache.
+    Transcripts made before 2.5 create it the first time you press Play.
 
 - **Words view:** the transcript, grouped by phrase. The word under the
   playhead lights up as you scrub or step frames. Click any word to jump to the
@@ -46,8 +73,21 @@ This version replaces AudioScribe v1, using the same bundle id.
     `<index in line> <word>` (`-1` clears), read by a Range Selector
     expression, so it follows the voice during real playback.
   - Don't rename the Top/Bottom layers: the boxes find them by name.
-  - The panel buttons set the defaults: **Highlight** on/off, and **Box**
-    (Off, Per line, Block). Lines (1 or 2) and line length are in Settings.
+  - **Box controls in the panel:** a uniform Padding slider (tick
+    **Separate X and Y padding** for individual control; unticking makes them
+    equal again), Roundness and Opacity, plus the **Highlight** and **Box**
+    (Off, Per line, Block) buttons. They edit a rig live, and the preview at
+    the top of the Captions tab updates as you change them.
+  - **Update captions:** after editing the transcript, select the rig and press
+    Update captions. It rewrites the rig's caption text, timing and word
+    markers from the current transcript, keeping fonts, box styling and
+    position. It's one undo step.
+    - They edit the rig you've selected (select any of its layers), or the
+      only rig in the comp. The label above the sliders says which.
+    - With no rig to edit, they set the defaults for new captions. Edits to a
+      rig also become the new defaults.
+    - Defaults are stored for 1080p and scaled to the comp's height.
+  - Lines (1 or 2) and line length are in Settings.
 - **Stays in sync:** words are stored in source time and mapped through the
   layer's Start Time and Stretch on every poll. Sliding, trimming, or
   stretching the layer is fine. Words outside the in/out points are dimmed and
@@ -66,9 +106,10 @@ This version replaces AudioScribe v1, using the same bundle id.
 
 ## Limits in v1
 
-- **No updates during spacebar playback.** The panel can't read the playhead
-  while AE plays a RAM preview. It follows scrubbing and frame stepping. The
-  captions layer plays in sync because it's native keyframes.
+- **AE's own spacebar playback isn't followed.** Panels can't read the
+  playhead during AE's preview, so use the panel's Play for live
+  follow-along. The panel follows scrubbing and frame stepping either way, and
+  captions play in sync because they're native keyframes.
 - **Footage layers only.** Precomps aren't supported yet.
 - **Time remapping is ignored.** If it's on, the panel warns you and word
   positions will be off.
@@ -93,7 +134,7 @@ which python   # Windows: where python
 
 The panel finds Python in an `aligner` environment under `~/miniforge3`,
 `~/miniconda3` or `~/anaconda3` by itself. If yours is elsewhere, paste the
-`which python` path into **Settings › Python**. The helper finds `mfa` next to
+`which python` path into **Settings › Advanced › Python**. The helper finds `mfa` next to
 that Python automatically.
 
 Without MFA, everything still works at word level. Sounds view will tell you
@@ -196,7 +237,7 @@ transcript, including any edits you made to it.
 ## Troubleshooting
 
 - **"Python not found":** AE doesn't see your shell's PATH. Put the full path
-  in Settings › Python.
+  in Settings › Advanced › Python.
 - **"MFA failed, keeping word timing only":** run the `mfa model download`
   commands above inside the same environment. The footer shows the end of
   MFA's error.

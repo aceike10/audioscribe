@@ -8,13 +8,12 @@
 <body>
 <div id="app">
   <header class="bar">
-    <span class="title">Transcript</span>
-    <span class="bar-right">
+    <div class="tabs" role="tablist" aria-label="AudioScribe">
+      <button role="tab" id="tabBtnTranscript" aria-controls="tabTranscript" aria-selected="true">Transcript</button>
+      <button role="tab" id="tabBtnCaptions" aria-controls="tabCaptions" aria-selected="false" tabindex="-1">Captions</button>
+      <button role="tab" id="tabBtnSettings" aria-controls="tabSettings" aria-selected="false" tabindex="-1">Settings</button>
+    </div>
     <button id="btnUpdate" class="btn update" hidden>Update</button>
-    <button id="btnSettings" class="icon" aria-label="Settings" aria-expanded="false">
-      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4h10M2 7h10M2 10h10"/></svg>
-    </button>
-    </span>
   </header>
 
   <div id="busy" class="busy" hidden>
@@ -28,84 +27,132 @@
     </button>
   </div>
 
-  <section id="settings" class="settings" hidden>
-    <label>Python <input id="setPython" placeholder="python3 (or full path to your aligner env's python)"></label>
-    <label>MFA <input id="setMfa" placeholder="auto: next to Python, then PATH"></label>
-    <div class="row">
-      <label>Whisper model
-        <select id="setModel">
-          <option>base</option><option selected>small</option><option>medium</option><option>large-v3</option>
-        </select>
-      </label>
-      <label>Language <input id="setLang" value="en" size="4"></label>
-    </div>
-    <label>Transcribe
-      <select id="setRange">
-        <option value="layer" selected>Only the part of the clip the layer uses</option>
-        <option value="whole">The whole file</option>
-      </select>
-    </label>
-    <div class="row">
-      <label>Lines <select id="setLines"><option value="1">1</option><option value="2" selected>2</option></select></label>
-      <label>Line length <input id="setChars" type="number" min="12" max="80" value="32"> chars</label>
-      <label>Highlight <input id="setColor" type="color" value="#f0a23b"></label>
-    </div>
-    <label class="check"><input id="setFresh" type="checkbox"> Ignore cache on next transcribe</label>
-    <hr>
-    <label>Update repo <input id="setRepo" placeholder="yourname/audioscribe"></label>
-    <label>GitHub token <input id="setToken" type="password" placeholder="only needed for a private repo"></label>
-    <div class="row between"><span id="appVersion" class="dim"></span><button id="btnCheck" class="btn">Check for updates</button></div>
-  </section>
-
-  <section class="layer">
-    <div class="layer-row">
-      <div id="layerNum" class="layer-num">–</div>
-      <div class="layer-meta">
-        <span id="layerName" class="layer-name">No layer loaded</span>
-        <span id="layerSub" class="sub">Select a footage layer, then transcribe</span>
+  <!-- ============================== Transcript ============================== -->
+  <section id="tabTranscript" class="tab" role="tabpanel" aria-labelledby="tabBtnTranscript">
+    <div class="layer">
+      <div class="row">
+        <div id="layerNum" class="layer-num">–</div>
+        <div class="layer-meta">
+          <span id="layerName" class="layer-name">No layer loaded</span>
+          <span id="layerSub" class="sub">Select a footage layer, then transcribe</span>
+        </div>
+        <button id="btnTranscribe" class="btn">Transcribe</button>
       </div>
-      <button id="btnTranscribe" class="btn">Transcribe</button>
+      <div class="row">
+        <label for="find" class="sr">Find in transcript</label>
+        <div class="find">
+          <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="#a8a8a8" stroke-width="1.4" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><path d="M8 8l2.5 2.5"/></svg>
+          <input id="find" placeholder="Find, then press Enter">
+        </div>
+      </div>
     </div>
-    <div class="layer-row">
+
+    <main id="transcript" class="transcript">
+      <p class="empty">Select a layer with dialogue in your comp and press Transcribe. Click any word to move the playhead there. Double-click a word to fix it.</p>
+    </main>
+
+    <div class="transport">
+      <button id="btnPlay" class="icon boxed play" aria-label="Play" aria-pressed="false" title="Play / pause (Space)">
+        <svg id="playIcon" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1.2v7.6L8.6 5z" fill="currentColor"/></svg>
+        <svg id="pauseIcon" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" hidden><path d="M2 1.5h2.2v7H2zM5.8 1.5H8v7H5.8z" fill="currentColor"/></svg>
+      </button>
       <div class="seg" role="group" aria-label="Granularity">
         <button id="modeWords" aria-pressed="true">Words</button>
         <button id="modeSounds" aria-pressed="false">Sounds</button>
       </div>
-      <label for="find" class="sr">Find in transcript</label>
-      <div class="find">
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="#a8a8a8" stroke-width="1.4" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><path d="M8 8l2.5 2.5"/></svg>
-        <input id="find" placeholder="Find, then press Enter">
+      <span class="hint">Space plays · click words or drag the waveform to jump</span>
+    </div>
+
+    <section id="sounds" class="sounds" hidden>
+      <div class="sounds-head">
+        <div><span id="sWord" class="s-word"></span> <span id="sSpan" class="mono dim"></span></div>
+        <div class="pair">
+          <button id="prevPhone" class="icon boxed" aria-label="Previous sound"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg></button>
+          <button id="nextPhone" class="icon boxed" aria-label="Next sound"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg></button>
+        </div>
+      </div>
+      <div id="phones" class="phones"></div>
+      <div class="sounds-foot"><span id="sShape"></span><span id="sNote"></span></div>
+    </section>
+
+    <section id="waveWrap" class="wave" hidden>
+      <canvas id="wave" tabindex="0" aria-label="Waveform of the current caption. Click or drag to move the playhead; Left and Right arrows step one frame."></canvas>
+    </section>
+  </section>
+
+  <!-- =============================== Captions =============================== -->
+  <section id="tabCaptions" class="tab scroll" role="tabpanel" aria-labelledby="tabBtnCaptions" hidden>
+    <div class="group">
+      <div class="preview"><div id="capPreview" class="cap"></div></div>
+      <p class="hint">Preview of the caption at the playhead.</p>
+    </div>
+
+    <div class="group">
+      <h2>Text</h2>
+      <div class="field-row">
+        <label>Lines <select id="setLines"><option value="1">1</option><option value="2" selected>2</option></select></label>
+        <label>Line length <input id="setChars" type="number" min="12" max="80" value="32"> chars</label>
+      </div>
+      <div class="field-row">
+        <button id="btnHighlight" class="btn" aria-pressed="true">Highlight: On</button>
+        <label>Color <input id="setColor" type="color" value="#f0a23b"></label>
       </div>
     </div>
-  </section>
 
-  <main id="transcript" class="transcript">
-    <p class="empty">Select a layer with dialogue in your comp and press Transcribe. Click any word to move the playhead there. Double-click a word to fix it.</p>
-  </main>
-
-  <section id="sounds" class="sounds" hidden>
-    <div class="sounds-head">
-      <div><span id="sWord" class="s-word"></span> <span id="sSpan" class="mono dim"></span></div>
-      <div class="pair">
-        <button id="prevPhone" class="icon boxed" aria-label="Previous sound"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg></button>
-        <button id="nextPhone" class="icon boxed" aria-label="Next sound"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg></button>
+    <div class="group box-style">
+      <div class="box-head"><h2>Box</h2><span id="rigTarget" class="dim">Defaults for new captions</span></div>
+      <div class="field-row"><button id="btnBg" class="btn">Box: Per line</button></div>
+      <div class="sl" id="rowPad"><label for="slPad">Padding</label><input type="range" id="slPad" min="0" step="1"><input type="number" id="nPad" min="0" aria-label="Padding value"></div>
+      <div id="padXY" class="pad-xy" hidden>
+        <div class="sl"><label for="slPadX">Padding X</label><input type="range" id="slPadX" min="0" step="1"><input type="number" id="nPadX" min="0" aria-label="Padding X value"></div>
+        <div class="sl"><label for="slPadY">Padding Y</label><input type="range" id="slPadY" min="0" step="1"><input type="number" id="nPadY" min="0" aria-label="Padding Y value"></div>
       </div>
+      <label class="check small"><input id="splitPad" type="checkbox"> Separate X and Y padding</label>
+      <div class="sl"><label for="slRound">Roundness</label><input type="range" id="slRound" min="0" step="1"><input type="number" id="nRound" min="0" aria-label="Roundness value"></div>
+      <div class="sl"><label for="slOpacity">Opacity %</label><input type="range" id="slOpacity" min="0" step="1"><input type="number" id="nOpacity" min="0" aria-label="Opacity value"></div>
     </div>
-    <div id="phones" class="phones"></div>
-    <div class="sounds-foot"><span id="sShape"></span><span id="sNote"></span></div>
+
+    <div class="group">
+      <div class="cap-actions">
+        <button id="btnCaptions" class="btn primary">Create captions</button>
+        <button id="btnUpdateCaps" class="btn" disabled>Update captions</button>
+      </div>
+      <p class="hint">Update rewrites the selected rig’s text and timing from the transcript and keeps its styling.</p>
+    </div>
   </section>
 
-  <section id="waveWrap" class="wave" hidden>
-    <canvas id="wave" tabindex="0" aria-label="Waveform of the current caption. Click or drag to move the playhead; Left and Right arrows step one frame."></canvas>
-  </section>
-
-  <section class="captions">
-    <div class="preview"><div id="capPreview" class="cap"></div></div>
-    <div class="layer-row">
-      <button id="btnHighlight" class="btn" aria-pressed="true">Highlight: On</button>
-      <button id="btnBg" class="btn">Box: Per line</button>
-      <button id="btnCaptions" class="btn primary">Create captions</button>
+  <!-- =============================== Settings =============================== -->
+  <section id="tabSettings" class="tab scroll settings" role="tabpanel" aria-labelledby="tabBtnSettings" hidden>
+    <div class="group">
+      <h2>Transcription</h2>
+      <div class="field-row">
+        <label>Model
+          <select id="setModel"><option>base</option><option selected>small</option><option>medium</option><option>large-v3</option></select>
+        </label>
+        <label>Language <input id="setLang" value="en" size="3"></label>
+      </div>
+      <label class="stack">Transcribe
+        <select id="setRange">
+          <option value="layer" selected>Only the part of the clip the layer uses</option>
+          <option value="whole">The whole file</option>
+        </select>
+      </label>
+      <label class="check"><input id="setFresh" type="checkbox"> Ignore cache on next transcribe</label>
     </div>
+
+    <div class="group">
+      <h2>Updates</h2>
+      <label class="stack">Update repo <input id="setRepo" placeholder="yourname/audioscribe"></label>
+      <label class="stack">GitHub token <input id="setToken" type="password" placeholder="only needed for a private repo"></label>
+      <div class="field-row between"><span id="appVersion" class="dim"></span><button id="btnCheck" class="btn">Check for updates</button></div>
+    </div>
+
+    <details class="group">
+      <summary>Advanced</summary>
+      <p class="hint">Normally found automatically. Set these only if transcription says Python or MFA can't be found.</p>
+      <label class="stack">Python <input id="setPython" placeholder="auto"></label>
+      <label class="stack">MFA <input id="setMfa" placeholder="auto: next to Python, then PATH"></label>
+    </details>
   </section>
 
   <footer class="foot">
