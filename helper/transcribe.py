@@ -42,6 +42,10 @@ def status(msg):
     print("STATUS: " + msg, file=sys.stderr, flush=True)
 
 
+def progress(frac):
+    print("PROGRESS: %.3f" % max(0.0, min(1.0, frac)), file=sys.stderr, flush=True)
+
+
 def norm(w):
     return re.sub(r"[^a-z0-9']", "", w.lower())
 
@@ -135,11 +139,12 @@ def peaks(clip, start, rate=100):
 
 def transcribe(audio, model_size, lang):
     from faster_whisper import WhisperModel
-    status("Loading Whisper " + model_size)
+    status("Loading Whisper " + model_size + " (first run downloads it)")
     model = WhisperModel(model_size, device="auto", compute_type="int8")
     status("Transcribing")
     segments, info = model.transcribe(audio, word_timestamps=True, vad_filter=True,
                                       language=lang or None)
+    total = max(0.1, len(audio) / SR)
     segs, words = [], []
     for seg in segments:
         ws = [w for w in (seg.words or []) if (w.word or "").strip()]
@@ -150,7 +155,8 @@ def transcribe(audio, model_size, lang):
         for w in ws:
             words.append({"word": w.word.strip(), "start": round(float(w.start), 3),
                           "end": round(float(w.end), 3), "seg": si})
-        status("Transcribed %.0fs" % float(seg.end))
+        status("Transcribing… %.0fs of %.0fs" % (float(seg.end), total))
+        progress(0.05 + 0.65 * float(seg.end) / total)
     return segs, words
 
 
@@ -171,7 +177,8 @@ def align(audio, segs, words, mfa):
             with open(os.path.join(corpus, name + ".lab"), "w", encoding="utf-8") as f:
                 f.write(text)
 
-        status("Aligning sounds (MFA)")
+        status("Timing individual sounds…")
+        progress(0.72)
         cmd = [mfa, "align", corpus, "english_us_arpa", "english_us_arpa", out,
                "--clean", "--single_speaker", "--beam", "100", "--retry_beam", "400"]
         r = subprocess.run(cmd, env=env_for(mfa), capture_output=True, text=True)
@@ -212,6 +219,7 @@ def align(audio, segs, words, mfa):
                                for ps, pe, p in mp if ps >= s - 1e-4 and pe <= e + 1e-4]
                 placed += 1
         status("Aligned %d of %d words" % (placed, len(words)))
+        progress(0.97)
         return placed > 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -240,6 +248,7 @@ def main():
         sys.exit(1)
 
     status("Reading audio")
+    progress(0.02)
     audio = decode_audio(a.src, sampling_rate=SR)
     dur = len(audio) / SR
     s = max(0.0, a.start or 0.0)

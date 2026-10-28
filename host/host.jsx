@@ -131,6 +131,11 @@ function _boxPrelude() {
   ].join('\n') + '\n';
 }
 
+function _expr(prop, code, label) {
+  try { prop.expression = code; }
+  catch (e) { throw new Error(label + ': ' + e.toString()); }
+}
+
 function _bgShape(c, name, ctrl, boxExpr, perLine) {
   var S = c.layers.addShape();
   S.name = name;
@@ -141,15 +146,16 @@ function _bgShape(c, name, ctrl, boxExpr, perLine) {
   var fill = cont.addProperty('ADBE Vector Graphic - Fill');
   S.parent = ctrl;
   var pre = _boxPrelude() + 'var B = ' + boxExpr + ';\n';
-  rect.property('ADBE Vector Rect Size').expression = pre +
-    'B ? [B[2] - B[0] + 2 * C.effect("Padding X")("Slider"), B[3] - B[1] + 2 * C.effect("Padding Y")("Slider")] : [0, 0];';
-  rect.property('ADBE Vector Rect Position').expression = pre +
-    'B ? fromComp([(B[0] + B[2]) / 2, (B[1] + B[3]) / 2]) : [0, 0];';
-  rect.property('ADBE Vector Rect Roundness').expression = 'thisLayer.parent.effect("Roundness")("Slider");';
-  fill.property('ADBE Vector Fill Color').expression = 'thisLayer.parent.effect("BG Color")("Color");';
-  S.property('ADBE Transform Group').property('ADBE Opacity').expression = pre +
+  _expr(rect.property('ADBE Vector Rect Size'), pre +
+    'B ? [B[2] - B[0] + 2 * C.effect("Padding X")("Slider"), B[3] - B[1] + 2 * C.effect("Padding Y")("Slider")] : [0, 0];',
+    name + ' size');
+  _expr(rect.property('ADBE Vector Rect Position'), pre +
+    'B ? fromComp([(B[0] + B[2]) / 2, (B[1] + B[3]) / 2]) : [0, 0];', name + ' position');
+  _expr(rect.property('ADBE Vector Rect Roundness'), 'thisLayer.parent.effect("Roundness")("Slider");', name + ' roundness');
+  _expr(fill.property('ADBE Vector Fill Color'), 'thisLayer.parent.effect("BG Color")("Color");', name + ' color');
+  _expr(S.property('ADBE Transform Group').property('ADBE Opacity'), pre +
     'var on = C.effect("Background")("Checkbox") == 1 && C.effect("Per Line")("Checkbox") == ' + (perLine ? 1 : 0) + ';\n' +
-    'on && B ? C.effect("BG Opacity")("Slider") : 0;';
+    'on && B ? C.effect("BG Opacity")("Slider") : 0;', name + ' opacity');
   return S;
 }
 
@@ -175,13 +181,13 @@ function _addHighlight(L) {
   var anim = anims.addProperty('ADBE Text Animator');
   anim.name = 'Word Highlight';
   var fill = anim.property('ADBE Text Animator Properties').addProperty('ADBE Text Fill Color');
-  fill.expression = 'thisLayer.parent.effect("Highlight Color")("Color");';
+  _expr(fill, 'thisLayer.parent.effect("Highlight Color")("Color");', L.name + ' highlight color');
   var sel = anim.property('ADBE Text Selectors').addProperty('ADBE Text Selector');
   var adv = sel.property('ADBE Text Range Advanced');
   adv.property('ADBE Text Range Units').setValue(2);   // Index
   adv.property('ADBE Text Range Type2').setValue(3);   // Based On: Words
-  sel.property('ADBE Text Index Start').expression = _hlExpr(false);
-  sel.property('ADBE Text Index End').expression = _hlExpr(true);
+  _expr(sel.property('ADBE Text Index Start'), _hlExpr(false), L.name + ' highlight start');
+  _expr(sel.property('ADBE Text Index End'), _hlExpr(true), L.name + ' highlight end');
   try {
     adv.property('ADBE Text Selector Max Amount').expression =
       'thisLayer.parent.effect("Word Highlight")("Checkbox") == 1 ? 100 : 0;';
@@ -222,6 +228,7 @@ function as_makeCaptions(path) {
   if (!d.cards || !d.cards.length) return _j({ ok: false, err: "No words fall inside the layer's in and out points." });
 
   app.beginUndoGroup('AudioScribe: Create captions');
+  var made = [];
   try {
     var two = d.lines === 2;
     var fs = Math.round(c.height * d.fontScale);
@@ -229,6 +236,7 @@ function as_makeCaptions(path) {
     var BLANK = ' ';
 
     var ctrl = c.layers.addNull();
+    made.push(ctrl);
     ctrl.name = base;
     ctrl.property('ADBE Transform Group').property('ADBE Anchor Point').setValue([0, 0]);
     ctrl.property('ADBE Transform Group').property('ADBE Position').setValue([c.width / 2, c.height * d.yPos]);
@@ -244,18 +252,29 @@ function as_makeCaptions(path) {
     _fx(ctrl, 'ADBE Color Control', 'Highlight Color', [d.color[0], d.color[1], d.color[2], 1]);
 
     var nTop = base + ' · Top', nBot = base + ' · Bottom';
-    // Created bottom of the stack first; each new layer lands on top.
-    _bgShape(c, base + ' · BG Block', ctrl,
-      two ? 'merge(box(' + _q(nTop) + '), box(' + _q(nBot) + '))' : 'box(' + _q(nBot) + ')', false);
-    _bgShape(c, base + ' · BG Bottom', ctrl, 'box(' + _q(nBot) + ')', true);
-    if (two) _bgShape(c, base + ' · BG Top', ctrl, 'box(' + _q(nTop) + ')', true);
+    // Text layers first: the boxes' expressions look them up by name.
     var bot = _textLayer(c, nBot, fs, ctrl);
+    made.push(bot);
     var top = null;
     if (two) {
       top = _textLayer(c, nTop, fs, ctrl);
-      top.property('ADBE Transform Group').property('ADBE Position').expression =
-        '[0, -thisLayer.parent.effect("Line Spacing")("Slider")];';
+      made.push(top);
+      _expr(top.property('ADBE Transform Group').property('ADBE Position'),
+        '[0, -thisLayer.parent.effect("Line Spacing")("Slider")];', nTop + ' position');
     }
+    var bgBlock = _bgShape(c, base + ' · BG Block', ctrl,
+      two ? 'merge(box(' + _q(nTop) + '), box(' + _q(nBot) + '))' : 'box(' + _q(nBot) + ')', false);
+    made.push(bgBlock);
+    var bgBot = _bgShape(c, base + ' · BG Bottom', ctrl, 'box(' + _q(nBot) + ')', true);
+    made.push(bgBot);
+    var bgTop = null;
+    if (two) { bgTop = _bgShape(c, base + ' · BG Top', ctrl, 'box(' + _q(nTop) + ')', true); made.push(bgTop); }
+    // Final stack, top to bottom: null, Top, Bottom, BG Top, BG Bottom, BG Block.
+    bgBlock.moveToBeginning();
+    bgBot.moveToBeginning();
+    if (bgTop) bgTop.moveToBeginning();
+    bot.moveToBeginning();
+    if (top) top.moveToBeginning();
     ctrl.moveToBeginning();
 
     var tTop = [], tBot = [], mTop = [], mBot = [];
@@ -296,7 +315,9 @@ function as_makeCaptions(path) {
     ctrl.selected = true;
     return _j({ ok: true, cards: d.cards.length, words: nWords, name: base });
   } catch (e) {
-    return _j({ ok: false, err: e.toString() + (e.line ? ' (line ' + e.line + ')' : '') });
+    // Don't leave half a rig behind.
+    for (var r = made.length - 1; r >= 0; r--) { try { made[r].remove(); } catch (e2) { /* already gone */ } }
+    return _j({ ok: false, err: 'Captions failed. ' + e.toString() + (e.line ? ' (host line ' + e.line + ')' : '') });
   } finally {
     app.endUndoGroup();
   }

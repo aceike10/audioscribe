@@ -39,6 +39,30 @@
 
   const status = (msg) => { $('status').textContent = msg || ''; $('status').title = msg || ''; };
 
+  // ---------------------------------------------------------------- feedback
+  // busy(msg, frac): progress strip under the header (frac null = indeterminate).
+  // notify(kind, msg): banner for results; errors stay until dismissed.
+  let onCancel = null, noticeTimer = null;
+  function busy(msg, frac, cancel) {
+    $('busy').hidden = false;
+    $('busyMsg').textContent = msg;
+    const bar = $('busyBar');
+    if (frac == null) { bar.classList.add('indet'); bar.style.width = ''; }
+    else { bar.classList.remove('indet'); bar.style.width = Math.round(frac * 100) + '%'; }
+    if (cancel !== undefined) onCancel = cancel;
+    $('busyCancel').hidden = !onCancel;
+  }
+  function busyEnd() { $('busy').hidden = true; onCancel = null; }
+  function notify(kind, msg) {
+    clearTimeout(noticeTimer);
+    const n = $('notice');
+    n.className = 'notice ' + kind;
+    $('noticeMsg').textContent = msg;
+    n.hidden = false;
+    if (kind !== 'error') noticeTimer = setTimeout(() => { n.hidden = true; }, 7000);
+  }
+  window.AS = { busy, busyEnd, notify };
+
   // ------------------------------------------------------------ time maths
   const rate = () => (S.timing.sr || 100) / 100;
   const compOf = (src) => S.timing.st + src * rate();
@@ -252,8 +276,12 @@
   }
 
   async function createCaptions() {
-    if (!S.layer) { status('Transcribe a layer first.'); return; }
+    if (!S.layer) { notify('error', 'Transcribe a layer first.'); return; }
     S.cards = buildCards();
+    if (!S.cards.length) { notify('error', 'No words fall inside the layer’s in and out points.'); return; }
+    $('btnCaptions').disabled = true;
+    busy('Creating ' + S.cards.length + ' captions in After Effects…', null);
+    await new Promise((r) => setTimeout(r, 60)); // let the panel paint before AE gets busy
     const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
     fs.writeFileSync(file, JSON.stringify({
       name: 'Captions – ' + S.layer.name, fontScale: 0.05, yPos: 0.88, lines: settings.lines,
@@ -262,7 +290,10 @@
         lines: c.lines.map((l) => ({ text: l.text, words: l.words })) }))
     }), 'utf8');
     const r = await esJSON('as_makeCaptions(' + JSON.stringify(file) + ')');
-    status(r.ok ? 'Created “' + r.name + '” · ' + r.cards + ' captions. Style it from the null’s Effect Controls.' : r.err);
+    busyEnd();
+    $('btnCaptions').disabled = false;
+    if (r.ok) notify('ok', 'Created “' + r.name + '” with ' + r.cards + ' captions. Select its null to style them in Effect Controls.');
+    else notify('error', r.err);
   }
 
   // ---------------------------------------------------------- transcription
@@ -345,15 +376,23 @@
       if (range[1] < WHOLE) args.push('--end', String(range[1]));
       let tail = '';
       const p = cp.spawn(py, args, { env: childEnv() });
+      let frac = 0.01, msg = 'Starting…', cancelled = false;
+      busy(msg, frac, () => { cancelled = true; p.kill(); });
       p.stderr.on('data', (d) => {
         const s = d.toString();
         tail = (tail + s).slice(-600);
-        s.split(/\r?\n/).forEach((line) => { if (line.startsWith('STATUS: ')) status(line.slice(8)); });
+        s.split(/\r?\n/).forEach((line) => {
+          if (line.startsWith('STATUS: ')) msg = line.slice(8);
+          else if (line.startsWith('PROGRESS: ')) frac = Number(line.slice(10)) || frac;
+          else return;
+          busy(msg, frac);
+        });
       });
+      p.on('close', () => { if (cancelled) reject(new Error('Cancelled')); });
       p.on('error', (e) => reject(new Error(e.code === 'ENOENT' ?
         'Python not found. Set its full path in Settings.' : e.message)));
       p.on('close', (code) => code === 0 ? resolve() :
-        reject(new Error((tail.split(/\r?\n/).filter((l) => l && !l.startsWith('STATUS')).pop()) || 'Transcription failed')));
+        reject(new Error((tail.split(/\r?\n/).filter((l) => l && !/^(STATUS|PROGRESS)/.test(l)).pop()) || 'Transcription failed')));
     });
   }
 
@@ -395,7 +434,7 @@
   async function transcribe() {
     if (S.busy) return;
     const L = await esJSON('as_getLayer()');
-    if (!L.ok) { status(L.err); return; }
+    if (!L.ok) { notify('error', L.err); return; }
     S.layer = L;
     S.timing = { st: L.st, sr: L.sr, ip: L.ip, op: L.op, fps: L.fps, remap: L.remap };
     $('layerNum').textContent = L.index;
@@ -410,23 +449,33 @@
       const hit = fresh ? null : findCache(L.path, range[0], Math.min(range[1], WHOLE));
       if (hit) {
         loadData(hit);
-        status(remapNote() || 'Loaded from cache · ' + S.words.length + ' words');
+        const note = remapNote();
+        if (note) notify('warn', note);
+        else notify('ok', 'Loaded ' + S.words.length + ' words (already transcribed).');
+        status(S.words.length + ' words');
         return;
       }
       out = newCachePath(L.path, range[0], range[1]);
-    } catch (e) { status('Cannot read the source file: ' + e.message); return; }
+    } catch (e) { notify('error', 'Cannot read the source file: ' + e.message); return; }
     S.busy = true;
     $('btnTranscribe').disabled = true;
-    status('Starting…');
+    $('btnTranscribe').textContent = 'Transcribing…';
     try {
       await runHelper(L.path, out, range);
       loadData(out);
-      status(remapNote() || (S.words.length + ' words' + (S.aligned ? ' · sounds aligned' : ' · word timing only')));
+      const note = remapNote();
+      if (note) notify('warn', note);
+      else notify('ok', 'Transcribed ' + S.words.length + ' words' +
+        (S.aligned ? ' with sound timing.' : '. Sound timing unavailable, so Sounds view is limited.'));
+      status(S.words.length + ' words');
     } catch (e) {
-      status(e.message);
+      if (e.message === 'Cancelled') notify('warn', 'Transcription cancelled.');
+      else notify('error', 'Transcription failed: ' + e.message);
     } finally {
+      busyEnd();
       S.busy = false;
       $('btnTranscribe').disabled = false;
+      $('btnTranscribe').textContent = 'Transcribe';
     }
   }
 
@@ -763,6 +812,8 @@
       undo();
     }
   });
+  $('busyCancel').onclick = () => { if (onCancel) onCancel(); };
+  $('noticeClose').onclick = () => { $('notice').hidden = true; };
   $('prevPhone').onclick = () => step(-1);
   $('nextPhone').onclick = () => step(1);
   $('modeWords').onclick = () => setMode('words');
