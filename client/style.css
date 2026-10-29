@@ -125,8 +125,9 @@ details.group[open] summary { margin-bottom: 2px; }
   display: flex; align-items: center; justify-content: center; padding: 6px 8px; text-align: center;
   font-size: 12px; font-weight: 700; }
 .cap { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; border-radius: 4px; }
-.cap { --px: 6px; --py: 3px; --r: 4px; --op: .7; }
-.cap-line { border-radius: var(--r); }
+.cap { --px: 6px; --py: 3px; --r: 4px; --op: .7; gap: 0; }
+.cap-line { border-radius: var(--r); line-height: 1.25; }
+.cap.uni .cap-line { line-height: 1; }
 .cap.bg-line .cap-line { background: rgba(0,0,0,var(--op)); padding: var(--py) var(--px); }
 .cap.bg-block:not(:empty) { background: rgba(0,0,0,var(--op)); padding: var(--py) var(--px); border-radius: var(--r); }
 .cap.bg-block { gap: 0; }
@@ -135,8 +136,10 @@ details.group[open] summary { margin-bottom: 2px; }
 
 .box-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 #rigTarget { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl { display: grid; grid-template-columns: 64px 1fr 48px; align-items: center; gap: 6px; }
+.sl { display: grid; grid-template-columns: 76px 1fr 48px; align-items: center; gap: 6px; }
 .sl label { color: var(--dim); }
+.font-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.font-row select { width: 100%; min-width: 0; }
 .pad-xy { display: flex; flex-direction: column; gap: 6px; }
 label.check.small { color: var(--dim); font-size: 10px; display: flex; align-items: center; gap: 5px; }
 .cap-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }

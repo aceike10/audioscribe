@@ -24,7 +24,7 @@
   // --------------------------------------------------------------- settings
   const SKEY = 'audioscribe.v2.settings';
   const defaults = { python: '', mfa: '', model: 'small', lang: 'en', chars: 32, color: '#f0a23b', highlight: true, range: 'layer', repo: '', token: '', lines: 2, bg: 'line',
-    box: { padX: 27, padY: 14, round: 19, opacity: 70 } };
+    box: { padX: 16, padY: 16, round: 16, opacity: 70, spacing: 90, uniform: true }, font: null };
   let settings = Object.assign({}, defaults);
   try { Object.assign(settings, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) { /* keep defaults */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
@@ -213,27 +213,48 @@
     const src = S.rig || settings.box;
     const ref = S.rig ? 1080 / (S.rig.h || 1080) : 1;
     const v = (key, d) => (src[key] == null ? d : src[key]);
+    const uni = S.rig ? S.rig.uniform !== 0 : settings.box.uniform !== false;
+    const f = currentFont();
     return {
-      mode: rigMode(), hl: rigHL(),
-      px: v('padX', 27) * ref * k, py: v('padY', 14) * ref * k,
-      r: v('round', 19) * ref * k, op: v('opacity', 70) / 100
+      mode: rigMode(), hl: rigHL(), uni, font: f,
+      px: v('padX', 16) * ref * k, py: v('padY', 16) * ref * k,
+      r: v('round', 16) * ref * k, op: v('opacity', 70) / 100,
+      sp: v('spacing', 90) * ref * k
     };
+  }
+  // Rough CSS weight/style from a font's style name, for the preview.
+  function cssFont(f) {
+    if (!f || !f.family) return { family: '', weight: '700', style: 'normal' };
+    const st = (f.style || '').toLowerCase();
+    const weight = /black|heavy/.test(st) ? '900' : /extra ?bold|ultra ?bold/.test(st) ? '800' :
+      /semi ?bold|demi/.test(st) ? '600' : /bold/.test(st) ? '700' : /medium/.test(st) ? '500' :
+        /extra ?light|ultra ?light/.test(st) ? '200' : /thin|hairline/.test(st) ? '100' : /light/.test(st) ? '300' : '400';
+    return { family: '"' + f.family.replace(/"/g, '') + '", system-ui, sans-serif', weight,
+      style: /italic|oblique/.test(st) ? 'italic' : 'normal' };
   }
 
   function renderPreview() {
     const box = $('capPreview');
     box.textContent = '';
     const look = previewLook();
-    box.className = 'cap bg-' + look.mode;
+    box.className = 'cap bg-' + look.mode + (look.uni ? ' uni' : '');
+    const cf = cssFont(look.font);
+    box.style.fontFamily = cf.family;
+    box.style.fontWeight = cf.weight;
+    box.style.fontStyle = cf.style;
     box.style.setProperty('--px', look.px.toFixed(1) + 'px');
     box.style.setProperty('--py', look.py.toFixed(1) + 'px');
     box.style.setProperty('--r', look.r.toFixed(1) + 'px');
     box.style.setProperty('--op', String(look.op));
     const card = cardOf(S.cur) || S.cards[0];
     if (!card) return;
-    card.lines.forEach((ln) => {
+    // Baseline-to-baseline spacing, as in AE: the gap between line boxes is the
+    // spacing minus the text height (and, per line, minus both paddings).
+    const gap = look.sp - 12 - (look.mode === 'line' ? 2 * look.py : 0);
+    card.lines.forEach((ln, li) => {
       const row = document.createElement('div');
       row.className = 'cap-line';
+      if (li > 0) row.style.marginTop = gap.toFixed(1) + 'px';
       ln.idxs.forEach((i) => {
         const s = document.createElement('span');
         s.className = 'cw' + (look.hl && i === S.cur ? ' hl' : '');
@@ -278,19 +299,32 @@
     return cards;
   }
 
-  // Two-line mode: split at the word boundary that best balances the lines.
+  // Splits a caption into as few lines as its length needs (up to the line
+  // count), choosing breaks that keep the longest line as short as possible.
   function splitLines(card, lines) {
     const items = card.idxs.map((i, k) => ({ i, w: card.words[k].w, t: card.words[k].t }));
     const mk = (arr) => ({ text: arr.map((x) => x.w).join(' '), idxs: arr.map((x) => x.i),
       words: arr.map((x) => ({ t: x.t, w: x.w })) });
-    if (lines < 2 || card.text.length <= settings.chars || items.length < 2) return [mk(items)];
-    let best = 1, score = Infinity;
-    for (let k = 1; k < items.length; k++) {
-      const a = mk(items.slice(0, k)).text.length, b = mk(items.slice(k)).text.length;
-      const sc = Math.max(a, b);
-      if (sc < score) { score = sc; best = k; }
+    const n = items.length;
+    const m = Math.min(lines, n, Math.max(1, Math.ceil(card.text.length / settings.chars)));
+    if (m <= 1) return [mk(items)];
+    const pre = [0];
+    items.forEach((x, k) => pre.push(pre[k] + x.w.length));
+    const len = (a, b) => pre[b] - pre[a] + (b - a - 1);
+    const best = [], cut = [];
+    for (let i = 0; i <= n; i++) { best.push(new Array(m + 1).fill(Infinity)); cut.push(new Array(m + 1).fill(0)); }
+    best[0][0] = 0;
+    for (let i = 1; i <= n; i++) {
+      for (let k = 1; k <= Math.min(i, m); k++) {
+        for (let j = k - 1; j < i; j++) {
+          const v = Math.max(best[j][k - 1], len(j, i));
+          if (v < best[i][k]) { best[i][k] = v; cut[i][k] = j; }
+        }
+      }
     }
-    return [mk(items.slice(0, best)), mk(items.slice(best))];
+    const out = [];
+    for (let i = n, k = m; k >= 1; k--) { const j = cut[i][k]; out.unshift(mk(items.slice(j, i))); i = j; }
+    return out;
   }
 
   function hexToRGB(h) {
@@ -309,6 +343,7 @@
     fs.writeFileSync(file, JSON.stringify({
       name: 'Captions – ' + S.layer.name, fontScale: 0.05, yPos: 0.88, lines: settings.lines,
       highlight: settings.highlight, color: hexToRGB(settings.color), bg: settings.bg, box: settings.box,
+      font: settings.font ? settings.font.ps : null,
       cards: S.cards.map((c) => ({ start: c.start, end: c.end,
         lines: c.lines.map((l) => ({ text: l.text, words: l.words })) }))
     }), 'utf8');
@@ -915,7 +950,8 @@
   const BOX = [
     { key: 'pad', id: 'Pad', max: 200 },
     { key: 'padX', id: 'PadX', max: 200 }, { key: 'padY', id: 'PadY', max: 200 },
-    { key: 'round', id: 'Round', max: 200 }, { key: 'opacity', id: 'Opacity', max: 100 }];
+    { key: 'round', id: 'Round', max: 200 }, { key: 'opacity', id: 'Opacity', max: 100 },
+    { key: 'spacing', id: 'Spacing', max: 200 }];
 
   function rigMode() { return !S.rig ? settings.bg : (S.rig.bg != 1 ? 'off' : S.rig.perLine == 1 ? 'line' : 'block'); }
   function rigHL() { return S.rig ? S.rig.hl == 1 : settings.highlight; }
@@ -935,6 +971,8 @@
     $('splitPad').checked = split;
     $('rowPad').hidden = split;
     $('padXY').hidden = !split;
+    $('uniformH').checked = S.rig && S.rig.uniform != null ? S.rig.uniform !== 0 : settings.box.uniform !== false;
+    renderFontSel();
     $('btnUpdateCaps').disabled = !S.rig;
     $('btnUpdateCaps').title = S.rig ? 'Rewrite “' + S.rig.name + '” from the current transcript' :
       'Select a captions rig to update it';
@@ -995,21 +1033,100 @@
     renderBox();
   });
 
+  $('uniformH').addEventListener('change', () => {
+    const on = $('uniformH').checked;
+    settings.box.uniform = on;
+    saveSettings();
+    if (S.rig) {
+      if (S.rig.uniform == null) notify('warn', 'This rig is from an older version. Press Update captions to add consistent height to it.');
+      else { S.rig.uniform = on ? 1 : 0; sendRig('uniform', S.rig.uniform); }
+    }
+    renderPreview();
+  });
+
+  // ------------------------------------------------------------------- fonts
+  // Font list comes from AE (2024+), loaded the first time Captions opens.
+  // The font applies to the selected rig live, and to new captions.
+  let FONTS = null, fontsLoading = false;
+  function currentFont() {
+    if (S.rig && S.rig.font) return { ps: S.rig.font, family: S.rig.fontFamily, style: S.rig.fontStyle };
+    return settings.font || null;
+  }
+  async function loadFonts() {
+    if (FONTS || fontsLoading) return;
+    fontsLoading = true;
+    const r = await esJSON('as_getFonts()');
+    fontsLoading = false;
+    const fam = $('fontFam');
+    if (!r.ok) {
+      fam.options[0].textContent = r.err || 'Fonts unavailable';
+      fam.disabled = true; $('fontStyle').disabled = true;
+      return;
+    }
+    FONTS = r.fonts.filter((f) => f.f).sort((a, b) => a.f.localeCompare(b.f));
+    const frag = document.createDocumentFragment();
+    FONTS.forEach((f, i) => { const o = document.createElement('option'); o.value = String(i); o.textContent = f.f; frag.appendChild(o); });
+    fam.appendChild(frag);
+    renderFontSel();
+  }
+  function fillStyles(fi, ps) {
+    const sel = $('fontStyle');
+    sel.textContent = '';
+    if (fi < 0) { sel.disabled = true; return; }
+    sel.disabled = false;
+    FONTS[fi].s.forEach(([name, p]) => { const o = document.createElement('option'); o.value = p; o.textContent = name; sel.appendChild(o); });
+    if (ps) sel.value = ps;
+  }
+  function renderFontSel() {
+    if (!FONTS) return;
+    if (document.activeElement === $('fontFam') || document.activeElement === $('fontStyle')) return;
+    const cf = currentFont();
+    const fi = cf ? FONTS.findIndex((f) => f.f === cf.family || f.s.some((x) => x[1] === cf.ps)) : -1;
+    $('fontFam').value = fi >= 0 ? String(fi) : '';
+    fillStyles(fi, cf && cf.ps);
+  }
+  async function applyFont(f) {
+    settings.font = f;
+    saveSettings();
+    if (S.rig && f) {
+      S.rig.font = f.ps; S.rig.fontFamily = f.family; S.rig.fontStyle = f.style;
+      const r = await esJSON('as_setRigFont(' + S.rig.id + ',' + JSON.stringify(f.ps) + ')');
+      if (!r.ok) notify('error', r.err);
+    }
+    renderPreview();
+  }
+  $('fontFam').addEventListener('change', () => {
+    const fi = $('fontFam').value === '' ? -1 : Number($('fontFam').value);
+    if (fi < 0) { fillStyles(-1); settings.font = null; saveSettings(); renderPreview(); return; }
+    const styles = FONTS[fi].s;
+    const pick = styles.find((x) => /^(regular|roman|book|normal)$/i.test(x[0])) || styles[0];
+    fillStyles(fi, pick[1]);
+    applyFont({ ps: pick[1], family: FONTS[fi].f, style: pick[0] });
+  });
+  $('fontStyle').addEventListener('change', () => {
+    const fi = Number($('fontFam').value);
+    const ps = $('fontStyle').value;
+    const st = FONTS[fi].s.find((x) => x[1] === ps);
+    applyFont({ ps, family: FONTS[fi].f, style: st ? st[0] : '' });
+  });
+
   async function updateCaptions() {
     if (!S.rig) { notify('error', 'Select the captions rig you want to update.'); return; }
     if (!S.layer || !S.words.length) { notify('error', 'Transcribe the dialogue layer first.'); return; }
-    const cards = buildCards(S.rig.lines);
+    const cards = buildCards(settings.lines);
     if (!cards.length) { notify('error', 'No words fall inside the layer’s in and out points.'); return; }
     const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
-    fs.writeFileSync(file, JSON.stringify({ cards: cards.map((c) => ({ start: c.start, end: c.end,
-      lines: c.lines.map((l) => ({ text: l.text, words: l.words })) })) }), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({ lines: settings.lines, fontScale: 0.05, box: settings.box,
+      bg: settings.bg, highlight: settings.highlight, color: hexToRGB(settings.color),
+      cards: cards.map((c) => ({ start: c.start, end: c.end,
+        lines: c.lines.map((l) => ({ text: l.text, words: l.words })) })) }), 'utf8');
     $('btnUpdateCaps').disabled = true;
     busy('Updating “' + S.rig.name + '”…', null);
     await new Promise((r) => setTimeout(r, 60));
     const r = await esJSON('as_updateCaptions(' + JSON.stringify(file) + ',' + S.rig.id + ')');
     busyEnd();
     $('btnUpdateCaps').disabled = !S.rig;
-    if (r.ok) notify('ok', 'Updated “' + r.name + '”: ' + r.cards + ' captions from the current transcript. Styling was kept.');
+    if (r.ok) notify('ok', 'Updated “' + r.name + '”: ' + r.cards + ' captions on ' + r.lines + (r.lines === 1 ? ' line' : ' lines') + '. Font, size, color and box settings were kept.');
     else notify('error', r.err);
   }
 
@@ -1094,7 +1211,7 @@
     });
     try { sessionStorage.setItem('audioscribe.tab', name); } catch (e) { /* ignore */ }
     if (name === 'Transcript') drawWave();
-    if (name === 'Captions') { renderPreview(); renderBox(); }
+    if (name === 'Captions') { renderPreview(); renderBox(); loadFonts(); }
   }
   TABS.forEach((t, k) => {
     const b = $('tabBtn' + t);
@@ -1110,7 +1227,7 @@
     const el = $(id);
     el.value = settings[key];
     el.addEventListener('change', () => {
-      settings[key] = key === 'lines' ? (Number(el.value) === 1 ? 1 : 2) :
+      settings[key] = key === 'lines' ? Math.max(1, Math.min(4, Number(el.value) || 2)) :
         num ? Math.max(12, Number(el.value) || defaults[key]) : el.value.trim();
       saveSettings();
       if (key === 'color') document.documentElement.style.setProperty('--playhead', settings.color);
@@ -1125,6 +1242,7 @@
   { const found = detectPython(); if (found) $('setPython').placeholder = 'auto: ' + found; }
   document.documentElement.style.setProperty('--playhead', settings.color);
   settings.box = Object.assign({}, defaults.box, settings.box);
+  if (!(settings.lines >= 1 && settings.lines <= 4)) settings.lines = 2;
   { let t = null; try { t = sessionStorage.getItem('audioscribe.tab'); } catch (e) { /* ignore */ }
     showTab(TABS.indexOf(t) >= 0 ? t : 'Transcript'); }
   setHighlight(settings.highlight);

@@ -58,36 +58,47 @@ Progress and results appear just under the tabs on every tab.
   focused, Left/Right step one frame (Shift for ten).
 - **Create captions:** builds a caption rig at the top of the comp:
   - **Captions – <layer>**: a null holding every control in Effect Controls
-    (Background, Per Line, Padding X/Y, Roundness, BG Color, BG Opacity, Line
-    Spacing, Word Highlight, Highlight Color). Move or scale the null to move
-    the captions.
-  - **· Top / · Bottom**: one text layer per caption line. Change font, size and
-    color on these as normal.
-  - **· BG Top / · BG Bottom / · BG Block**: rounded boxes sized by expression
-    to the text. The **Per Line** checkbox switches between one box per line
-    and one box around the whole caption. **Background** turns boxes off.
+    (Background, Per Line, Uniform Height, Padding X/Y, Roundness, BG Color,
+    BG Opacity, Line Spacing, Word Highlight, Highlight Color). Move or scale
+    the null to move the captions.
+  - **· Line 1 … · Line 4**: one text layer per caption line, top to bottom.
+    Change size and color on these as normal. Captions that need fewer lines
+    fill the bottom lines, so text stays anchored to the null.
+  - **· BG Line 1 … / · BG Block**: rounded boxes sized by expression to the
+    text. The **Per Line** checkbox switches between one box per line and one
+    box around the whole caption. **Background** turns boxes off.
+  - **Uniform Height** (on by default) sizes each box from the font size
+    rather than the letters, so capitals and descenders like g and y don't
+    change box height. Turn it off to fit boxes tightly to each line's text.
   - Captions break at sentence ends, at pauses over 0.7 s, or at the length
-    limit. With 2 lines, each caption splits at the most balanced word
-    boundary.
+    limit. Each caption uses as few lines as it needs, up to the line count,
+    and breaks where it keeps the longest line shortest.
   - Word highlight: every word has a marker whose comment is
     `<index in line> <word>` (`-1` clears), read by a Range Selector
     expression, so it follows the voice during real playback.
-  - Don't rename the Top/Bottom layers: the boxes find them by name.
-  - **Box controls in the panel:** a uniform Padding slider (tick
-    **Separate X and Y padding** for individual control; unticking makes them
-    equal again), Roundness and Opacity, plus the **Highlight** and **Box**
-    (Off, Per line, Block) buttons. They edit a rig live, and the preview at
-    the top of the Captions tab updates as you change them.
-  - **Update captions:** after editing the transcript, select the rig and press
-    Update captions. It rewrites the rig's caption text, timing and word
-    markers from the current transcript, keeping fonts, box styling and
-    position. It's one undo step.
-    - They edit the rig you've selected (select any of its layers), or the
-      only rig in the comp. The label above the sliders says which.
-    - With no rig to edit, they set the defaults for new captions. Edits to a
-      rig also become the new defaults.
-    - Defaults are stored for 1080p and scaled to the comp's height.
-  - Lines (1 or 2) and line length are in Settings.
+  - Don't rename the line layers: the boxes find them by name.
+- **Captions tab controls:**
+  - **Preview** at the top shows the caption at the playhead with the current
+    look, and updates live as you change anything below it.
+  - **Font** and style dropdowns under the preview list AE's installed fonts
+    (AE 2024 or later). The font applies to the selected rig live and to new
+    captions.
+  - **Text:** Lines (1–4), line length, Line spacing (baseline to baseline),
+    and the word Highlight toggle and color.
+  - **Box:** Off / Per line / Block, a uniform Padding slider (tick **Separate
+    X and Y padding** for individual control; unticking makes them equal
+    again), Consistent height, Roundness and Opacity.
+  - These edit the rig you've selected (select any of its layers), or the
+    only rig in the comp. The label next to "Box" says which. With no rig to
+    edit, they set the defaults for new captions, and edits to a rig also
+    become the new defaults. Defaults are stored for 1080p and scaled to the
+    comp's height.
+  - **Update captions:** select the rig and press Update. It rebuilds the
+    rig's caption lines from the current transcript at the current line
+    count, so you can go from 1 line to 3 and back. It keeps the null
+    (position and every control) and the text style (font, size, color,
+    stroke, tracking). It's one undo step. Rigs from before 2.6 (with Top /
+    Bottom layers) are converted the first time you Update them.
 - **Stays in sync:** words are stored in source time and mapped through the
   layer's Start Time and Stretch on every poll. Sliding, trimming, or
   stretching the layer is fine. Words outside the in/out points are dimmed and

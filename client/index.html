@@ -84,15 +84,21 @@
   <section id="tabCaptions" class="tab scroll" role="tabpanel" aria-labelledby="tabBtnCaptions" hidden>
     <div class="group">
       <div class="preview"><div id="capPreview" class="cap"></div></div>
-      <p class="hint">Preview of the caption at the playhead.</p>
+      <div class="font-row">
+        <label for="fontFam" class="sr">Font</label>
+        <select id="fontFam"><option value="">Default font</option></select>
+        <label for="fontStyle" class="sr">Font style</label>
+        <select id="fontStyle" disabled></select>
+      </div>
     </div>
 
     <div class="group">
       <h2>Text</h2>
       <div class="field-row">
-        <label>Lines <select id="setLines"><option value="1">1</option><option value="2" selected>2</option></select></label>
+        <label>Lines <select id="setLines"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
         <label>Line length <input id="setChars" type="number" min="12" max="80" value="32"> chars</label>
       </div>
+      <div class="sl"><label for="slSpacing">Line spacing</label><input type="range" id="slSpacing" min="0" step="1"><input type="number" id="nSpacing" min="0" aria-label="Line spacing value"></div>
       <div class="field-row">
         <button id="btnHighlight" class="btn" aria-pressed="true">Highlight: On</button>
         <label>Color <input id="setColor" type="color" value="#f0a23b"></label>
@@ -108,6 +114,7 @@
         <div class="sl"><label for="slPadY">Padding Y</label><input type="range" id="slPadY" min="0" step="1"><input type="number" id="nPadY" min="0" aria-label="Padding Y value"></div>
       </div>
       <label class="check small"><input id="splitPad" type="checkbox"> Separate X and Y padding</label>
+      <label class="check small"><input id="uniformH" type="checkbox" checked> Consistent height (ignore capitals and descenders)</label>
       <div class="sl"><label for="slRound">Roundness</label><input type="range" id="slRound" min="0" step="1"><input type="number" id="nRound" min="0" aria-label="Roundness value"></div>
       <div class="sl"><label for="slOpacity">Opacity %</label><input type="range" id="slOpacity" min="0" step="1"><input type="number" id="nOpacity" min="0" aria-label="Opacity value"></div>
     </div>
