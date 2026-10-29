@@ -59,7 +59,8 @@ Progress and results appear just under the tabs on every tab.
 - **Create captions:** builds a caption rig at the top of the comp:
   - **Captions – <layer>**: a null holding every control in Effect Controls
     (Background, Per Line, Uniform Height, Padding X/Y, Roundness, BG Color,
-    BG Opacity, Line Spacing, Word Highlight, Highlight Color). Move or scale
+    BG Opacity, Line Spacing, Word Highlight, Highlight Color, Sound Highlight,
+    Sound Color, Ghost, Ghost Color, Ghost Opacity). Move or scale
     the null to move the captions.
   - **· Line 1 … · Line 4**: one text layer per caption line, top to bottom.
     Change size and color on these as normal. Captions that need fewer lines
@@ -76,15 +77,27 @@ Progress and results appear just under the tabs on every tab.
   - Word highlight: every word has a marker whose comment is
     `<index in line> <word>` (`-1` clears), read by a Range Selector
     expression, so it follows the voice during real playback.
+  - Sound highlight: when sound timing is available, the marker also carries
+    the word's sounds (`…|<duration>|<sound start times>|<letter ranges>`). A
+    second animator colors the letters of the sound being spoken, on top of
+    the word highlight. Spelling doesn't map exactly to sounds, so a word's
+    letters are spread evenly across its sounds, at least one letter each.
   - Don't rename the line layers: the boxes find them by name.
 - **Captions tab controls:**
+  - **Editing** (top of the tab) picks what the controls change: any captions
+    rig in the comp, including ghosts hidden from the timeline, or the
+    defaults for new captions. Selecting a rig layer in the timeline picks it
+    too.
   - **Preview** at the top shows the caption at the playhead with the current
     look, and updates live as you change anything below it.
   - **Font** and style dropdowns under the preview list AE's installed fonts
     (AE 2024 or later). The font applies to the selected rig live and to new
     captions.
-  - **Text:** Lines (1–4), line length, Line spacing (baseline to baseline),
-    and the word Highlight toggle and color.
+  - **Text:** Lines (1–4), line length, Size, Line spacing (baseline to
+    baseline), the word Highlight toggle and color, and the Sound highlight
+    toggle and color. Size applies to every
+    caption keyframe of the rig. Line spacing doesn't follow size
+    automatically, so raise it too when you go much bigger.
   - **Box:** Off / Per line / Block, a uniform Padding slider (tick **Separate
     X and Y padding** for individual control; unticking makes them equal
     again), Consistent height, Roundness and Opacity.
@@ -93,6 +106,17 @@ Progress and results appear just under the tabs on every tab.
     edit, they set the defaults for new captions, and edits to a rig also
     become the new defaults. Defaults are stored for 1080p and scaled to the
     comp's height.
+  - **Ghost mode:** turns a rig into a guide. Its layers become AE guide
+    layers, so they show in the comp viewer but never render, in the render
+    queue or when the comp is nested. They're also made shy and the comp's
+    Hide Shy Layers switch is turned on, so they stay out of the timeline;
+    reach them with the Editing picker. (Hide Shy Layers is per comp, so other
+    shy layers hide too; the shy button at the top of the timeline shows them.)
+    Turning Ghost on for a rig doesn't change the default for new captions. Ghost captions get a red box at 90%
+    opacity (both adjustable), shown even if Background is off, and the
+    preview is tagged "Ghost · won't render". Turning it off makes the same
+    captions render normally again. As a default, new captions are created
+    as ghosts.
   - **Update captions:** select the rig and press Update. It rebuilds the
     rig's caption lines from the current transcript at the current line
     count, so you can go from 1 line to 3 and back. It keeps the null

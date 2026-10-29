@@ -23,8 +23,9 @@
 
   // --------------------------------------------------------------- settings
   const SKEY = 'audioscribe.v2.settings';
-  const defaults = { python: '', mfa: '', model: 'small', lang: 'en', chars: 32, color: '#f0a23b', highlight: true, range: 'layer', repo: '', token: '', lines: 2, bg: 'line',
-    box: { padX: 16, padY: 16, round: 16, opacity: 70, spacing: 90, uniform: true }, font: null };
+  const defaults = { python: '', mfa: '', model: 'small', lang: 'en', chars: 32, color: '#f0a23b', highlight: true, range: 'layer', repo: '', token: '', lines: 2, bg: 'line', sound: true, soundColor: '#5cd1ff',
+    box: { padX: 16, padY: 16, round: 16, opacity: 70, spacing: 90, uniform: true, size: 54,
+      ghost: false, ghostOpacity: 90, ghostColor: '#d91a1a' }, font: null };
   let settings = Object.assign({}, defaults);
   try { Object.assign(settings, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) { /* keep defaults */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
@@ -215,11 +216,19 @@
     const v = (key, d) => (src[key] == null ? d : src[key]);
     const uni = S.rig ? S.rig.uniform !== 0 : settings.box.uniform !== false;
     const f = currentFont();
+    const ghost = isGhost();
+    let mode = rigMode();
+    // Ghost captions always show a box, even with Background off.
+    if (ghost && mode === 'off') mode = (S.rig ? S.rig.perLine != 0 : settings.bg !== 'block') ? 'line' : 'block';
+    const gc = S.rig && Array.isArray(S.rig.ghostColor) ? S.rig.ghostColor : hexToRGB(settings.box.ghostColor || '#d91a1a');
+    const op = ghost ? v('ghostOpacity', 90) / 100 : v('opacity', 70) / 100;
+    const rgb = ghost ? gc.slice(0, 3).map((x) => Math.round(x * 255)) : [0, 0, 0];
     return {
-      mode: rigMode(), hl: rigHL(), uni, font: f,
+      mode, hl: rigHL(), uni, font: f, ghost, sound: rigSound(),
       px: v('padX', 16) * ref * k, py: v('padY', 16) * ref * k,
-      r: v('round', 16) * ref * k, op: v('opacity', 70) / 100,
-      sp: v('spacing', 90) * ref * k
+      r: v('round', 16) * ref * k, sp: v('spacing', 90) * ref * k,
+      fs: v('size', 54) * ref * k,
+      bg: 'rgba(' + rgb.join(',') + ',' + op + ')'
     };
   }
   // Rough CSS weight/style from a font's style name, for the preview.
@@ -245,12 +254,16 @@
     box.style.setProperty('--px', look.px.toFixed(1) + 'px');
     box.style.setProperty('--py', look.py.toFixed(1) + 'px');
     box.style.setProperty('--r', look.r.toFixed(1) + 'px');
-    box.style.setProperty('--op', String(look.op));
+    box.style.setProperty('--bgc', look.bg);
+    box.style.setProperty('--snd', S.rig && Array.isArray(S.rig.soundColor) ? rgbHex(S.rig.soundColor) : settings.soundColor);
+    box.style.fontSize = look.fs.toFixed(1) + 'px';
+    $('ghostTag').hidden = !look.ghost;
+    box.parentElement.classList.toggle('ghosted', look.ghost);
     const card = cardOf(S.cur) || S.cards[0];
     if (!card) return;
     // Baseline-to-baseline spacing, as in AE: the gap between line boxes is the
     // spacing minus the text height (and, per line, minus both paddings).
-    const gap = look.sp - 12 - (look.mode === 'line' ? 2 * look.py : 0);
+    const gap = look.sp - look.fs - (look.mode === 'line' ? 2 * look.py : 0);
     card.lines.forEach((ln, li) => {
       const row = document.createElement('div');
       row.className = 'cap-line';
@@ -258,7 +271,14 @@
       ln.idxs.forEach((i) => {
         const s = document.createElement('span');
         s.className = 'cw' + (look.hl && i === S.cur ? ' hl' : '');
-        s.textContent = S.words[i].word;
+        const w = S.words[i];
+        if (i === S.cur && look.sound && w.phones && w.phones.length) {
+          const cs = soundChars(w), j = Math.min(S.phone, w.phones.length - 1);
+          const snd = document.createElement('span');
+          snd.className = 'snd';
+          snd.textContent = w.word.slice(cs[j][0], cs[j][1]);
+          s.append(w.word.slice(0, cs[j][0]), snd, w.word.slice(cs[j][1]));
+        } else s.textContent = w.word;
         row.appendChild(s);
       });
       box.appendChild(row);
@@ -267,6 +287,31 @@
   const cardOf = (i) => S.cards.find((c) => c.idxs.indexOf(i) >= 0);
 
   // --------------------------------------------------------------- captions
+  // Letters for each sound of a word, as [start, end) offsets within the word.
+  // Spelling doesn't map 1:1 to sounds, so the letters (punctuation excluded)
+  // are spread evenly across the sounds, and every sound gets at least one.
+  function soundChars(w) {
+    const word = w.word, n = (w.phones || []).length;
+    const lead = word.match(/^[^A-Za-z0-9']*/)[0].length;
+    const trail = word.slice(lead).match(/[^A-Za-z0-9']*$/)[0].length;
+    const L = Math.max(1, word.length - lead - trail);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.min(L - 1, Math.floor(i * L / n));
+      const b = Math.min(L, Math.max(a + 1, Math.floor((i + 1) * L / n)));
+      out.push([lead + a, lead + b]);
+    }
+    return out;
+  }
+  // "<duration>|<sound starts>|<char offsets>" for a word's marker, in comp time.
+  function phoneSpec(w) {
+    if (!w.phones || !w.phones.length) return '';
+    const t0 = compOf(w.start);
+    return (compOf(w.end) - t0).toFixed(3) + '|' +
+      w.phones.map((p) => Math.max(0, compOf(p.start) - t0).toFixed(3)).join(',') + '|' +
+      soundChars(w).map((x) => x[0] + '-' + x[1]).join(',');
+  }
+
   function buildCards(lines) {
     lines = lines || settings.lines;
     const cards = [];
@@ -282,7 +327,7 @@
       if (cur && ((len > limit && !finishes) || cs - cur.lastEnd > 0.7)) close();
       if (!cur) cur = { start: snap(cs), text: '', words: [], idxs: [], lastEnd: ce };
       cur.text += (cur.text ? ' ' : '') + w.word;
-      cur.words.push({ t: snap(cs), w: w.word });
+      cur.words.push({ t: snap(cs), w: w.word, ph: phoneSpec(w) });
       cur.idxs.push(i);
       cur.lastEnd = ce;
       if (/[.!?]["'”’)\]]?$/.test(w.word)) close();
@@ -302,9 +347,9 @@
   // Splits a caption into as few lines as its length needs (up to the line
   // count), choosing breaks that keep the longest line as short as possible.
   function splitLines(card, lines) {
-    const items = card.idxs.map((i, k) => ({ i, w: card.words[k].w, t: card.words[k].t }));
+    const items = card.idxs.map((i, k) => ({ i, w: card.words[k].w, t: card.words[k].t, ph: card.words[k].ph }));
     const mk = (arr) => ({ text: arr.map((x) => x.w).join(' '), idxs: arr.map((x) => x.i),
-      words: arr.map((x) => ({ t: x.t, w: x.w })) });
+      words: arr.map((x) => (x.ph ? { t: x.t, w: x.w, ph: x.ph } : { t: x.t, w: x.w })) });
     const n = items.length;
     const m = Math.min(lines, n, Math.max(1, Math.ceil(card.text.length / settings.chars)));
     if (m <= 1) return [mk(items)];
@@ -327,6 +372,11 @@
     return out;
   }
 
+  // Defaults for the host, with the ghost colour as RGBA.
+  function hostBox() {
+    return Object.assign({}, settings.box, { ghostColor: hexToRGB(settings.box.ghostColor || '#d91a1a').concat([1]) });
+  }
+
   function hexToRGB(h) {
     const n = parseInt(h.replace('#', ''), 16);
     return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
@@ -342,8 +392,9 @@
     const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
     fs.writeFileSync(file, JSON.stringify({
       name: 'Captions – ' + S.layer.name, fontScale: 0.05, yPos: 0.88, lines: settings.lines,
-      highlight: settings.highlight, color: hexToRGB(settings.color), bg: settings.bg, box: settings.box,
+      highlight: settings.highlight, color: hexToRGB(settings.color), bg: settings.bg, box: hostBox(),
       font: settings.font ? settings.font.ps : null,
+      sound: settings.sound, soundColor: hexToRGB(settings.soundColor).concat([1]),
       cards: S.cards.map((c) => ({ start: c.start, end: c.end,
         lines: c.lines.map((l) => ({ text: l.text, words: l.words })) }))
     }), 'utf8');
@@ -951,7 +1002,10 @@
     { key: 'pad', id: 'Pad', max: 200 },
     { key: 'padX', id: 'PadX', max: 200 }, { key: 'padY', id: 'PadY', max: 200 },
     { key: 'round', id: 'Round', max: 200 }, { key: 'opacity', id: 'Opacity', max: 100 },
-    { key: 'spacing', id: 'Spacing', max: 200 }];
+    { key: 'spacing', id: 'Spacing', max: 200 }, { key: 'size', id: 'Size', max: 160 },
+    { key: 'ghostOpacity', id: 'GhostOp', max: 100 }];
+  // Values in pixels: shown in comp pixels for a rig, stored as 1080p defaults.
+  const PX_KEYS = ['padX', 'padY', 'round', 'spacing', 'size'];
 
   function rigMode() { return !S.rig ? settings.bg : (S.rig.bg != 1 ? 'off' : S.rig.perLine == 1 ? 'line' : 'block'); }
   function rigHL() { return S.rig ? S.rig.hl == 1 : settings.highlight; }
@@ -964,14 +1018,14 @@
   }
 
   function renderBox() {
-    $('rigTarget').textContent = S.rig ? 'Editing “' + S.rig.name + '”' :
-      S.rigMany ? 'Select a captions rig to edit it' : 'Defaults for new captions';
-    $('rigTarget').title = $('rigTarget').textContent;
+    renderRigPick();
     const split = !!settings.box.split;
     $('splitPad').checked = split;
     $('rowPad').hidden = split;
     $('padXY').hidden = !split;
     $('uniformH').checked = S.rig && S.rig.uniform != null ? S.rig.uniform !== 0 : settings.box.uniform !== false;
+    renderGhost();
+    renderSound();
     renderFontSel();
     $('btnUpdateCaps').disabled = !S.rig;
     $('btnUpdateCaps').title = S.rig ? 'Rewrite “' + S.rig.name + '” from the current transcript' :
@@ -999,7 +1053,8 @@
     while (Object.keys(rigPending).length && S.rig) {
       const k = Object.keys(rigPending)[0], v = rigPending[k];
       delete rigPending[k];
-      const r = await esJSON('as_setRig(' + S.rig.id + ',' + JSON.stringify(k) + ',' + v + ')');
+      const r = k === 'size' ? await esJSON('as_setRigFontSize(' + S.rig.id + ',' + v + ')') :
+        await esJSON('as_setRig(' + S.rig.id + ',' + JSON.stringify(k) + ',' + JSON.stringify(v) + ')');
       if (!r.ok) { notify('error', r.err); S.rig = null; renderBox(); break; }
     }
     rigSending = false;
@@ -1009,11 +1064,11 @@
     if (S.rig) {
       S.rig[key] = v;
       sendRig(key, v);
-      settings.box[key] = key === 'opacity' ? v : Math.round(v * 1080 / (S.rig.h || 1080));
+      settings.box[key] = PX_KEYS.indexOf(key) >= 0 ? Math.round(v * 1080 / (S.rig.h || 1080)) : v;
     } else settings.box[key] = v;
   }
   function setBoxValue(b, v) {
-    v = Math.max(0, Math.min(b.key === 'opacity' ? 100 : 999, Number(v) || 0));
+    v = Math.max(b.key === 'size' ? 1 : 0, Math.min(PX_KEYS.indexOf(b.key) >= 0 || b.key === 'pad' ? 999 : 100, Number(v) || 0));
     if (b.key === 'pad') { setOne('padX', v); setOne('padY', v); }
     else setOne(b.key, v);
     saveSettings();
@@ -1031,6 +1086,43 @@
     }
     saveSettings();
     renderBox();
+  });
+
+  // ------------------------------------------------------------------- ghost
+  // Ghost captions are guide layers: visible in the comp, never rendered.
+  function isGhost() { return S.rig && S.rig.ghost != null ? S.rig.ghost == 1 : !!settings.box.ghost; }
+  const rgbHex = (c) => '#' + c.slice(0, 3).map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+  function renderGhost() {
+    const on = isGhost();
+    $('btnGhost').setAttribute('aria-pressed', String(on));
+    $('btnGhost').textContent = 'Ghost: ' + (on ? 'On' : 'Off');
+    $('ghostOpts').hidden = !on;
+    if (document.activeElement !== $('ghostColor')) {
+      $('ghostColor').value = S.rig && Array.isArray(S.rig.ghostColor) ? rgbHex(S.rig.ghostColor) : (settings.box.ghostColor || '#d91a1a');
+    }
+  }
+  function setGhost(on) {
+    // Ghost on a rig stays on that rig; only with no rig does it set the default.
+    if (!S.rig) { settings.box.ghost = on; saveSettings(); }
+    if (S.rig) {
+      if (S.rig.ghost == null) { notify('warn', 'This rig is from an older version. Press Update captions first to add ghost mode to it.'); return; }
+      S.rig.ghost = on ? 1 : 0;
+      sendRig('ghost', S.rig.ghost);
+      notify('ok', on ? 'Ghost on: these captions are now guides and won’t render.' : 'Ghost off: these captions will render.');
+    }
+    renderGhost();
+    renderPreview();
+  }
+  $('btnGhost').onclick = () => setGhost(!isGhost());
+  $('ghostColor').addEventListener('input', () => {
+    settings.box.ghostColor = $('ghostColor').value;
+    saveSettings();
+    if (S.rig && S.rig.ghost != null) {
+      const c = hexToRGB($('ghostColor').value).concat([1]);
+      S.rig.ghostColor = c;
+      sendRig('ghostColor', c);
+    }
+    renderPreview();
   });
 
   $('uniformH').addEventListener('change', () => {
@@ -1116,8 +1208,9 @@
     const cards = buildCards(settings.lines);
     if (!cards.length) { notify('error', 'No words fall inside the layer’s in and out points.'); return; }
     const file = path.join(os.tmpdir(), 'audioscribe_captions.json');
-    fs.writeFileSync(file, JSON.stringify({ lines: settings.lines, fontScale: 0.05, box: settings.box,
+    fs.writeFileSync(file, JSON.stringify({ lines: settings.lines, fontScale: 0.05, box: hostBox(),
       bg: settings.bg, highlight: settings.highlight, color: hexToRGB(settings.color),
+      sound: settings.sound, soundColor: hexToRGB(settings.soundColor).concat([1]),
       cards: cards.map((c) => ({ start: c.start, end: c.end,
         lines: c.lines.map((l) => ({ text: l.text, words: l.words })) })) }), 'utf8');
     $('btnUpdateCaps').disabled = true;
@@ -1141,11 +1234,45 @@
     n.addEventListener('keydown', (e) => { if (e.key === 'Enter') { setBoxValue(b, n.value); n.blur(); } });
   });
 
+  // The rig picker: every captions rig in the comp (ghosts included, since
+  // they're hidden from the timeline), or the defaults for new captions.
+  S.pick = 0; S.rigs = [];
+  function renderRigPick() {
+    const sel = $('rigPick');
+    if (document.activeElement === sel) return;
+    const want = S.rigs.map((x) => x.id + ':' + x.name + (x.ghost ? ' (ghost)' : '')).join('|');
+    if (sel.dataset.sig !== want) {
+      sel.dataset.sig = want;
+      sel.textContent = '';
+      const o0 = document.createElement('option');
+      o0.value = '-1'; o0.textContent = 'Defaults for new captions';
+      sel.appendChild(o0);
+      S.rigs.forEach((x) => {
+        const o = document.createElement('option');
+        o.value = String(x.id); o.textContent = x.name + (x.ghost ? ' (ghost)' : '');
+        sel.appendChild(o);
+      });
+    }
+    sel.value = S.rig ? String(S.rig.id) : '-1';
+  }
+  $('rigPick').addEventListener('change', async () => {
+    S.pick = Number($('rigPick').value);
+    const r = await esJSON('as_getRig(' + S.pick + ')');
+    if (r.ok) { S.rigs = r.rigs || []; S.rig = r.found ? r : null; renderBox(); }
+  });
+
   async function pollRig() {
     try {
       if (!S.busy && !document.hidden && !S.rigDrag && !rigSending) {
-        const r = await esJSON('as_getRig()');
-        if (r.ok) { S.rig = r.found ? r : null; S.rigMany = !!r.many; renderBox(); }
+        const r = await esJSON('as_getRig(' + S.pick + ')');
+        if (r.ok) {
+          S.rigs = r.rigs || [];
+          S.rig = r.found ? r : null;
+          // Selecting a rig layer in the timeline also picks it here.
+          if (S.rig && S.pick !== S.rig.id) S.pick = S.rig.id;
+          if (!S.rig && S.pick > 0 && !S.rigs.some((x) => x.id === S.pick)) S.pick = 0;
+          renderBox();
+        }
       }
     } catch (e) { /* AE busy; try again */ }
     setTimeout(pollRig, 800);
@@ -1161,6 +1288,35 @@
     renderToggles();
     renderPreview();
   }
+  function rigSound() { return S.rig && S.rig.sound != null ? S.rig.sound == 1 : settings.sound !== false; }
+  function renderSound() {
+    const on = rigSound();
+    $('btnSound').setAttribute('aria-pressed', String(on));
+    $('btnSound').textContent = 'Sound: ' + (on ? 'On' : 'Off');
+    if (document.activeElement !== $('soundColor')) {
+      $('soundColor').value = S.rig && Array.isArray(S.rig.soundColor) ? rgbHex(S.rig.soundColor) : settings.soundColor;
+    }
+  }
+  function setSound(on) {
+    settings.sound = on; saveSettings();
+    if (S.rig) {
+      if (S.rig.sound == null) notify('warn', 'This rig is from an older version. Press Update captions to add sound highlighting.');
+      else { S.rig.sound = on ? 1 : 0; sendRig('sound', S.rig.sound); }
+    }
+    renderSound();
+    renderPreview();
+  }
+  $('btnSound').onclick = () => setSound(!rigSound());
+  $('soundColor').addEventListener('input', () => {
+    settings.soundColor = $('soundColor').value; saveSettings();
+    if (S.rig && S.rig.sound != null) {
+      const c = hexToRGB(settings.soundColor).concat([1]);
+      S.rig.soundColor = c;
+      sendRig('soundColor', c);
+    }
+    renderPreview();
+  });
+
   function setHighlight(on) {
     settings.highlight = on; saveSettings();
     if (S.rig) { S.rig.hl = on ? 1 : 0; sendRig('hl', S.rig.hl); }

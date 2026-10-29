@@ -117,6 +117,58 @@ function _expr(prop, code, label) {
   catch (e) { throw new Error(label + ': ' + e.toString()); }
 }
 
+// Sound highlight: word markers can carry the word's sounds after "|":
+//   "<idx> <word>|<duration>|<sound start times>|<start-end,…>"
+// (times relative to the word's start; letter ranges within the word, one per
+// sound). The expression finds the current sound and returns its character
+// range within the line.
+function _soundExpr(end) {
+  return [
+    'var m = thisLayer.marker, r = [0, 0];',
+    'if (m.numKeys > 0) {',
+    '  var k = m.nearestKey(time).index;',
+    '  if (m.key(k).time > time) k--;',
+    '  if (k > 0) {',
+    '    var c = m.key(k).comment, idx = parseInt(c, 10), p = c.split("|");',
+    '    var dt = time - m.key(k).time;',
+    '    if (idx >= 0 && p.length >= 4 && dt < parseFloat(p[1])) {',
+    '      var ts = p[2].split(","), cs = p[3].split(","), j = 0;',
+    '      for (var i = 0; i < ts.length; i++) if (dt >= parseFloat(ts[i])) j = i;',
+    '      var s = thisLayer.text.sourceText.value;',
+    '      s = (s && s.text !== undefined) ? s.text : String(s);',
+    '      var ws = s.split(" "), off = 0;',
+    '      for (var q = 0; q < idx && q < ws.length; q++) off += ws[q].length + 1;',
+    '      var se = String(cs[j]).split("-");',
+    '      r = [off + parseInt(se[0], 10), off + parseInt(se[1], 10)];',
+    '    }',
+    '  }',
+    '}',
+    'r[' + (end ? 1 : 0) + '];'
+  ].join('\n');
+}
+
+function _addSoundHighlight(L) {
+  var anims = L.property('ADBE Text Properties').property('ADBE Text Animators');
+  anims.addProperty('ADBE Text Animator');
+  var idx = anims.numProperties;
+  anims.property(idx).property('ADBE Text Animator Properties').addProperty('ADBE Text Fill Color');
+  anims.property(idx).property('ADBE Text Selectors').addProperty('ADBE Text Selector');
+  var anim = L.property('ADBE Text Properties').property('ADBE Text Animators').property(idx);
+  anim.name = 'Sound Highlight';
+  _expr(anim.property('ADBE Text Animator Properties').property('ADBE Text Fill Color'),
+    'thisLayer.parent.effect("Sound Color")("Color");', L.name + ' sound color');
+  var sel = anim.property('ADBE Text Selectors').property(1);
+  var adv = sel.property('ADBE Text Range Advanced');
+  adv.property('ADBE Text Range Units').setValue(2);   // Index
+  adv.property('ADBE Text Range Type2').setValue(1);   // Based On: Characters
+  _expr(sel.property('ADBE Text Index Start'), _soundExpr(false), L.name + ' sound start');
+  _expr(sel.property('ADBE Text Index End'), _soundExpr(true), L.name + ' sound end');
+  try {
+    adv.property('ADBE Text Selector Max Amount').expression =
+      'thisLayer.parent.effect("Sound Highlight")("Checkbox") == 1 ? 100 : 0;';
+  } catch (e) { /* older AE: stays on */ }
+}
+
 function _addHighlight(L) {
   var anims = L.property('ADBE Text Properties').property('ADBE Text Animators');
   anims.addProperty('ADBE Text Animator');
@@ -202,6 +254,12 @@ function _boxPrelude() {
   ].join('\n') + '\n';
 }
 
+// g = ghost mode on (false for rigs made before ghost mode existed).
+function _ghostPrelude(haveC) {
+  return (haveC ? '' : 'var C = thisLayer.parent;\n') +
+    'var g = false;\ntry { g = C.effect("Ghost")("Checkbox") == 1; } catch (e) {}\n';
+}
+
 function _bgShape(c, name, ctrl, boxExpr, perLine) {
   var S = c.layers.addShape();
   S.name = name;
@@ -223,10 +281,11 @@ function _bgShape(c, name, ctrl, boxExpr, perLine) {
   _expr(rect.property('ADBE Vector Rect Position'), pre +
     'B ? fromComp([(B[0] + B[2]) / 2, (B[1] + B[3]) / 2]) : [0, 0];', name + ' position');
   _expr(rect.property('ADBE Vector Rect Roundness'), 'thisLayer.parent.effect("Roundness")("Slider");', name + ' roundness');
-  _expr(fill.property('ADBE Vector Fill Color'), 'thisLayer.parent.effect("BG Color")("Color");', name + ' color');
-  _expr(S.property('ADBE Transform Group').property('ADBE Opacity'), pre +
-    'var on = C.effect("Background")("Checkbox") == 1 && C.effect("Per Line")("Checkbox") == ' + (perLine ? 1 : 0) + ';\n' +
-    'on && B ? C.effect("BG Opacity")("Slider") : 0;', name + ' opacity');
+  _expr(fill.property('ADBE Vector Fill Color'), _ghostPrelude() +
+    'g ? C.effect("Ghost Color")("Color") : C.effect("BG Color")("Color");', name + ' color');
+  _expr(S.property('ADBE Transform Group').property('ADBE Opacity'), pre + _ghostPrelude(true) +
+    'var on = (g || C.effect("Background")("Checkbox") == 1) && C.effect("Per Line")("Checkbox") == ' + (perLine ? 1 : 0) + ';\n' +
+    'on && B ? (g ? C.effect("Ghost Opacity")("Slider") : C.effect("BG Opacity")("Slider")) : 0;', name + ' opacity');
   return S;
 }
 
@@ -287,7 +346,12 @@ function _ensureFx(ctrl, c, d) {
     ['ADBE Slider Control', 'BG Opacity', num(bx.opacity, 70)],
     ['ADBE Slider Control', 'Line Spacing', Math.round(num(bx.spacing, 90) * k)],
     ['ADBE Checkbox Control', 'Word Highlight', d.highlight === false ? 0 : 1],
-    ['ADBE Color Control', 'Highlight Color', [col[0], col[1], col[2], 1]]
+    ['ADBE Color Control', 'Highlight Color', [col[0], col[1], col[2], 1]],
+    ['ADBE Checkbox Control', 'Sound Highlight', d.sound === false ? 0 : 1],
+    ['ADBE Color Control', 'Sound Color', d.soundColor || [0.36, 0.82, 1, 1]],
+    ['ADBE Checkbox Control', 'Ghost', bx.ghost ? 1 : 0],
+    ['ADBE Color Control', 'Ghost Color', bx.ghostColor || [0.85, 0.1, 0.1, 1]],
+    ['ADBE Slider Control', 'Ghost Opacity', num(bx.ghostOpacity, 90)]
   ];
   for (var i = 0; i < list.length; i++) {
     if (!ctrl.property('ADBE Effect Parade').property(list[i][1])) _fx(ctrl, list[i][0], list[i][1], list[i][2]);
@@ -326,7 +390,10 @@ function _writeCaptionKeys(d, L) {
     }
     for (j = 0; j < ls.length; j++) {
       k = j + off;
-      for (var w = 0; w < ls[j].words.length; w++) M[k].push({ t: ls[j].words[w].t, v: w + ' ' + ls[j].words[w].w });
+      for (var w = 0; w < ls[j].words.length; w++) {
+        var wd = ls[j].words[w];
+        M[k].push({ t: wd.t, v: w + ' ' + wd.w + (wd.ph ? '|' + wd.ph : '') });
+      }
       nWords += ls[j].words.length;
       if (j + 1 < ls.length) M[k].push({ t: ls[j + 1].words[0].t, v: '-1' }); // done when the next line starts
     }
@@ -338,7 +405,9 @@ function _writeCaptionKeys(d, L) {
 }
 
 function _defaultStyle(c, d) {
-  return { fontSize: Math.round(c.height * (d.fontScale || 0.05)), font: d.font || null,
+  var bx = d.box || {};
+  var size = typeof bx.size === 'number' && bx.size > 0 ? bx.size * c.height / 1080 : c.height * (d.fontScale || 0.05);
+  return { fontSize: Math.round(size), font: d.font || null,
     applyFill: true, fillColor: [1, 1, 1], applyStroke: false };
 }
 
@@ -362,7 +431,8 @@ function as_makeCaptions(path) {
     ctrl.moveToBeginning();
     var lines = _buildLines(c, ctrl, base, n, _defaultStyle(c, d), made);
     var nWords = _writeCaptionKeys(d, lines);
-    for (var i = 0; i < lines.length; i++) _addHighlight(lines[i]);
+    for (var i = 0; i < lines.length; i++) { _addHighlight(lines[i]); _addSoundHighlight(lines[i]); }
+    if (_isGhost(ctrl)) _applyGhost(ctrl, true);
     ctrl.selected = true;
     return _j({ ok: true, cards: d.cards.length, words: nWords, name: base, lines: n });
   } catch (e) {
@@ -373,11 +443,27 @@ function as_makeCaptions(path) {
   }
 }
 
+// Ghost mode: every rig layer becomes a guide layer (visible in the comp,
+// never rendered or seen through a nested comp).
+function _isGhost(R) {
+  var p = R.property('ADBE Effect Parade').property('Ghost');
+  return !!(p && p.property(1).value == 1);
+}
+// Ghost rigs are also shy and the comp hides shy layers, so they stay out of
+// the timeline; the panel's rig picker reaches them.
+function _applyGhost(R, on) {
+  var all = _rigParts(R).all.concat([R]);
+  for (var i = 0; i < all.length; i++) { all[i].guideLayer = on; all[i].shy = on; }
+  if (on) R.containingComp.hideShyLayers = true;
+}
+
 /* ------------------------------------------------------- caption rig styling
    The panel's controls drive the controller null of the selected rig. */
 
 var RIG_FX = { padX: 'Padding X', padY: 'Padding Y', round: 'Roundness', opacity: 'BG Opacity',
-  bg: 'Background', perLine: 'Per Line', hl: 'Word Highlight', spacing: 'Line Spacing', uniform: 'Uniform Height' };
+  bg: 'Background', perLine: 'Per Line', hl: 'Word Highlight', spacing: 'Line Spacing', uniform: 'Uniform Height',
+  ghost: 'Ghost', ghostColor: 'Ghost Color', ghostOpacity: 'Ghost Opacity',
+  sound: 'Sound Highlight', soundColor: 'Sound Color' };
 
 function _isRig(L) {
   try {
@@ -416,25 +502,28 @@ function _rigParts(R) {
   return { lines: lines, all: all };
 }
 
-function as_getRig() {
+// Which rig to edit. pick: 0 = automatic (selected layer, else the only rig),
+// -1 = none (defaults unless a rig layer is selected), or a rig's layer id.
+function as_getRig(pick) {
   var c = _comp();
-  if (!c) return _j({ ok: true, found: false });
+  if (!c) return _j({ ok: true, found: false, rigs: [] });
+  pick = pick || 0;
+  var rigs = [], list = [], j;
+  for (j = 1; j <= c.numLayers; j++) if (_isRig(c.layer(j))) rigs.push(c.layer(j));
+  for (j = 0; j < rigs.length; j++) list.push({ id: rigs[j].id, name: rigs[j].name, ghost: _isGhost(rigs[j]) });
   var R = null, sel = c.selectedLayers;
   for (var i = 0; i < sel.length && !R; i++) R = _rigOf(sel[i]);
-  if (!R) {
-    var all = [];
-    for (var j = 1; j <= c.numLayers; j++) if (_isRig(c.layer(j))) all.push(c.layer(j));
-    if (all.length === 1) R = all[0];
-    else return _j({ ok: true, found: false, many: all.length > 1, h: c.height });
-  }
+  if (!R && pick > 0) for (j = 0; j < rigs.length; j++) if (rigs[j].id === pick) R = rigs[j];
+  if (!R && pick === 0 && rigs.length === 1) R = rigs[0];
+  if (!R) return _j({ ok: true, found: false, many: rigs.length > 1, h: c.height, rigs: list });
   var parts = _rigParts(R);
-  var out = { ok: true, found: true, id: R.id, name: R.name, h: c.height, lines: parts.lines.length };
+  var out = { ok: true, found: true, id: R.id, name: R.name, h: c.height, lines: parts.lines.length, rigs: list };
   for (var k in RIG_FX) if (RIG_FX.hasOwnProperty(k)) out[k] = _rigVal(R, k);
   if (parts.lines.length) {
     try {
       var p = parts.lines[0].property('ADBE Text Properties').property('ADBE Text Document');
       var td = p.numKeys ? p.keyValue(1) : p.value;
-      out.font = td.font; out.fontFamily = td.fontFamily; out.fontStyle = td.fontStyle;
+      out.font = td.font; out.fontFamily = td.fontFamily; out.fontStyle = td.fontStyle; out.size = td.fontSize;
     } catch (e) { /* older AE: no font info */ }
   }
   return _j(out);
@@ -450,6 +539,7 @@ function as_setRig(id, key, value) {
   try {
     if (p.numKeys > 0) p.setValueAtTime(R.containingComp.time, value);
     else p.setValue(value);
+    if (key === 'ghost') _applyGhost(R, value == 1);
   } catch (e) {
     return _j({ ok: false, err: e.toString() });
   } finally {
@@ -475,6 +565,27 @@ function as_setRigFont(id, ps) {
     return _j({ ok: true });
   } catch (e) {
     return _j({ ok: false, err: 'Font change failed. ' + e.toString() });
+  } finally {
+    app.endUndoGroup();
+  }
+}
+
+// Sets the font size on every caption keyframe of the rig's line layers.
+function as_setRigFontSize(id, size) {
+  var R = _layer(id);
+  if (!R || !_isRig(R)) return _j({ ok: false, err: "That captions rig is gone." });
+  size = Math.max(1, Math.min(1296, Number(size) || 1));
+  var lines = _rigParts(R).lines;
+  app.beginUndoGroup('AudioScribe: Caption size');
+  try {
+    for (var i = 0; i < lines.length; i++) {
+      var p = lines[i].property('ADBE Text Properties').property('ADBE Text Document'), td;
+      if (p.numKeys === 0) { td = p.value; td.fontSize = size; p.setValue(td); continue; }
+      for (var k = 1; k <= p.numKeys; k++) { td = p.keyValue(k); td.fontSize = size; p.setValueAtKey(k, td); }
+    }
+    return _j({ ok: true });
+  } catch (e) {
+    return _j({ ok: false, err: 'Size change failed. ' + e.toString() });
   } finally {
     app.endUndoGroup();
   }
@@ -521,8 +632,9 @@ function as_updateCaptions(path, id) {
     _ensureFx(R, c, d);
     var lines = _buildLines(c, R, R.name, n, style, made);
     var nWords = _writeCaptionKeys(d, lines);
-    for (var j = 0; j < lines.length; j++) _addHighlight(lines[j]);
+    for (var j = 0; j < lines.length; j++) { _addHighlight(lines[j]); _addSoundHighlight(lines[j]); }
     for (var k = parts.all.length - 1; k >= 0; k--) parts.all[k].remove();
+    _applyGhost(R, _isGhost(R));
     return _j({ ok: true, cards: d.cards.length, words: nWords, name: R.name, lines: n });
   } catch (e) {
     for (var r = made.length - 1; r >= 0; r--) { try { made[r].remove(); } catch (e2) { /* gone */ } }

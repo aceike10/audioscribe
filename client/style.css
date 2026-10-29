@@ -128,11 +128,21 @@ details.group[open] summary { margin-bottom: 2px; }
 .cap { --px: 6px; --py: 3px; --r: 4px; --op: .7; gap: 0; }
 .cap-line { border-radius: var(--r); line-height: 1.25; }
 .cap.uni .cap-line { line-height: 1; }
-.cap.bg-line .cap-line { background: rgba(0,0,0,var(--op)); padding: var(--py) var(--px); }
-.cap.bg-block:not(:empty) { background: rgba(0,0,0,var(--op)); padding: var(--py) var(--px); border-radius: var(--r); }
+.cap { --bgc: rgba(0,0,0,.7); }
+.cap.bg-line .cap-line { background: var(--bgc); padding: var(--py) var(--px); }
+.cap.bg-block:not(:empty) { background: var(--bgc); padding: var(--py) var(--px); border-radius: var(--r); }
+.preview { position: relative; }
+.preview.ghosted { padding-top: 20px; }
+.ghost-tag { position: absolute; top: 4px; right: 5px; font-size: 9px; font-weight: 600; color: #ffd0d0;
+  background: rgba(150,20,20,.85); padding: 1px 5px; border-radius: 3px; }
+#btnGhost[aria-pressed=true] { background: #7a1f1f; border-color: #b33a3a; color: #fff; }
 .cap.bg-block { gap: 0; }
 .preview .cw { color: #fff; margin: 0 2px; }
 .preview .cw.hl { color: var(--playhead); }
+.preview .cw .snd { color: var(--snd, #5cd1ff); }
+.rig-row { flex-direction: row; align-items: center; gap: 8px; padding-top: 7px; padding-bottom: 7px; }
+.rig-row label { color: var(--dim); flex: none; }
+.rig-row select { flex: 1; min-width: 0; }
 
 .box-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 #rigTarget { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
